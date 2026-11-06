@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: canteen-corner-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres_secure_2026@db:5432/canteen_corner?schema=public
+      - JWT_SECRET=canteen-corner-super-secure-production-jwt-key-2026-correctional-facility
+      - NODE_ENV=production
+      - TOUCHPAY_PROVIDER_TYPE=mock
+      - TOUCHPAY_API_KEY=tp_live_key_canteen_987421
+      - TOUCHPAY_WEBHOOK_SECRET=tp_whsec_mock_canteen_corner_verification_sig
+      - TOUCHPAY_FACILITY_ID=FACILITY_CC_01
+      - WEEKLY_RESET_DAY=0
+      - DEFAULT_WEEKLY_LIMIT=100.00
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    container_name: canteen-corner-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_secure_2026
+      POSTGRES_DB: canteen_corner
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d canteen_corner"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+

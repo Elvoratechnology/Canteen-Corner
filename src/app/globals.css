@@ -1,0 +1,164 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-color: #f8fafc;
+  --text-color: #0f172a;
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+  --accent-teal: #14b8a6;
+}
+
+html.dark {
+  --bg-color: #000000;
+  --text-color: #ffffff;
+  --card-bg: #121212;
+  --card-border: #262626;
+  --accent-teal: #14b8a6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  padding: 0;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Glass & Card Primitives with Uniform Pure Black in Dark Mode */
+.card-theme {
+  background-color: var(--card-bg);
+  border: 1px solid var(--card-border);
+  transition: all 0.2s ease;
+}
+
+.card-theme:hover {
+  border-color: rgba(20, 184, 166, 0.4);
+}
+
+.card-theme-interactive {
+  background-color: var(--card-bg);
+  border: 1px solid var(--card-border);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card-theme-interactive:hover {
+  transform: translateY(-2px);
+  border-color: rgba(20, 184, 166, 0.5);
+  box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.4);
+}
+
+.glass-input {
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #0f172a;
+  font-size: 16px; /* Prevents auto-zoom on iOS */
+  min-height: 44px; /* Touch target requirement */
+  font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+html.dark .glass-input {
+  background-color: #121212;
+  border: 1px solid #262626;
+  color: #ffffff;
+}
+
+.glass-input:focus {
+  outline: none;
+  border-color: #14b8a6;
+  box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.25);
+}
+
+.btn-teal {
+  background-color: #14b8a6;
+  color: #ffffff;
+  font-weight: 700;
+  min-height: 44px;
+  min-width: 44px;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+html.dark .btn-teal {
+  background-color: #14b8a6;
+  color: #ffffff;
+}
+
+.btn-teal:hover:not(:disabled) {
+  background-color: #0d9488;
+  transform: translateY(-1px);
+}
+
+.btn-teal:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-teal:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Touch targets >= 44px */
+button,
+a.button-target,
+input,
+select {
+  min-height: 44px;
+}
+
+/* Safe area insets */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 16px);
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top, 16px);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.3);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(20, 184, 166, 0.6);
+}
+
+/* Print styles for warehouse picking lists and manifests */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .card-theme {
+    background: #ffffff !important;
+    border: 1px solid #cccccc !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+  }
+}
