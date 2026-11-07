@@ -34,6 +34,10 @@ export async function GET(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
+    if (session.facilityId && (order.offender as any)?.facilityId && (order.offender as any).facilityId !== session.facilityId) {
+      return NextResponse.json({ error: 'Access denied: Order belongs to another facility.' }, { status: 403 });
+    }
+
     return NextResponse.json({ order });
   } catch (error) {
     console.error('Error fetching order detail:', error);
@@ -69,11 +73,15 @@ export async function PATCH(
     const { action, barcode, notes } = result.data;
     const order = await prisma.order.findUnique({
       where: { id: params.id },
-      include: { pickingList: true },
+      include: { pickingList: true, offender: true },
     });
 
     if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    }
+
+    if (session.facilityId && (order.offender as any)?.facilityId && (order.offender as any).facilityId !== session.facilityId) {
+      return NextResponse.json({ error: 'Access denied: Order belongs to another facility.' }, { status: 403 });
     }
 
     let newStatus = order.status;

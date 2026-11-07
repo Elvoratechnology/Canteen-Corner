@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { IPaymentProvider, PaymentIntentRequest, PaymentIntentResponse, WebhookVerificationResult, TouchPayWebhookPayload } from './types';
 import prisma from '@/lib/db';
 import { logAuditAction } from '@/lib/audit';
@@ -63,9 +64,22 @@ export class MockTouchPayProvider implements IPaymentProvider {
   ): Promise<WebhookVerificationResult> {
     try {
       const signature = headers['x-touchpay-signature'] || headers['X-TouchPay-Signature'];
-      // Accept either matching secret or test header in mock mode
-      if (!signature && process.env.NODE_ENV === 'production') {
+      if (!signature) {
         return { valid: false, error: 'Missing TouchPay webhook signature header' };
+      }
+
+      const expectedSig = crypto
+        .createHmac('sha256', this.webhookSecret)
+        .update(rawBody)
+        .digest('hex');
+
+      const isTestAllowed = process.env.NODE_ENV !== 'production';
+      const isSignatureValid =
+        signature === expectedSig ||
+        (isTestAllowed && (signature.startsWith('test_') || signature === this.webhookSecret));
+
+      if (!isSignatureValid) {
+        return { valid: false, error: 'Invalid HMAC webhook signature' };
       }
 
       const payload = JSON.parse(rawBody) as TouchPayWebhookPayload;

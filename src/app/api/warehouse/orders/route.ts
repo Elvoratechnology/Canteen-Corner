@@ -17,6 +17,14 @@ export async function GET(req: NextRequest) {
 
     const whereClause: any = {};
 
+    // Multi-tenant facility isolation
+    if (session.facilityId) {
+      whereClause.offender = {
+        ...whereClause.offender,
+        facilityId: session.facilityId,
+      };
+    }
+
     if (statusFilter && statusFilter !== 'ALL') {
       whereClause.status = statusFilter;
     }

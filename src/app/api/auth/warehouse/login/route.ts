@@ -82,6 +82,7 @@ export async function POST(req: NextRequest) {
       name: user.name,
       email: user.email || '',
       staffId: user.staffId || undefined,
+      facilityId: (user as any).facilityId || undefined,
       role: user.role as any,
     });
 

@@ -14,10 +14,18 @@ export async function GET() {
         where: { id: session.offenderId },
         include: { facility: true },
       });
+
+      if (!offender) {
+        return NextResponse.json({ authenticated: false, session: null }, { status: 404 });
+      }
+
+      // Explicitly sanitize and never expose pinHash in session queries
+      const { pinHash, ...safeOffender } = offender;
+
       return NextResponse.json({
         authenticated: true,
         session,
-        offender,
+        offender: safeOffender,
       });
     }
 
