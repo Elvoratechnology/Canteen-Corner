@@ -42,6 +42,18 @@ export async function POST(req: NextRequest) {
         throw new Error('OFFENDER_NOT_FOUND');
       }
 
+      // Check account lockout status
+      if (offender.pinLockedUntil && offender.pinLockedUntil > new Date()) {
+        throw new Error('ACCOUNT_LOCKED: Inmate account is temporarily locked due to failed PIN attempts.');
+      }
+
+      if (offender.userId) {
+        const user = await tx.user.findUnique({ where: { id: offender.userId } });
+        if (user && user.lockedUntil && user.lockedUntil > new Date()) {
+          throw new Error('ACCOUNT_LOCKED: Inmate account is currently locked.');
+        }
+      }
+
       // 2. Aggregate quantities by productId to prevent duplicate item stock bypass
       const aggregatedItemsMap = new Map<string, number>();
       for (const item of items) {
