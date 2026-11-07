@@ -1056,6 +1056,8 @@ END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- 9.3 ATOMIC INMATE ORDER SUBMISSION WITH PRODUCT & FACILITY ISOLATION
+CREATE SEQUENCE IF NOT EXISTS public.order_number_seq START WITH 77001;
+
 CREATE OR REPLACE FUNCTION public.place_inmate_order(
   p_items JSONB
 )
@@ -1072,6 +1074,8 @@ DECLARE
   v_product RECORD;
   v_item_total NUMERIC(10, 2);
   v_delivery_date TIMESTAMPTZ;
+  v_seq_val BIGINT;
+  v_retry_count INTEGER := 0;
 BEGIN
   v_offender_id := public.current_inmate_offender_id();
   IF v_offender_id IS NULL OR public.current_user_role() != 'INMATE' THEN
@@ -1141,12 +1145,6 @@ BEGIN
       v_subtotal, (v_offender.weekly_limit - v_offender.current_weekly_spent);
   END IF;
 
-  -- Collision-safe Order Number and Barcode generation
-  LOOP
-    v_order_num := '#CC-' || LPAD(FLOOR(RANDOM() * 90000 + 10000)::TEXT, 5, '0');
-    v_barcode := 'BC-' || SUBSTRING(v_order_num FROM 2) || '-' || TO_CHAR(now(), 'YYYYMMDD') || '-' || LPAD(FLOOR(RANDOM() * 900 + 100)::TEXT, 3, '0');
-    EXIT WHEN NOT EXISTS (SELECT 1 FROM public.orders WHERE order_number = v_order_num OR barcode = v_barcode);
-  END LOOP;
   v_delivery_date := now() + INTERVAL '3 days';
 
   PERFORM set_config('canteen.authorized_transaction', 'true', true);
@@ -1171,27 +1169,43 @@ BEGIN
       updated_at = now()
   WHERE id = v_offender_id;
 
-  INSERT INTO public.orders (
-    order_number,
-    facility_id,
-    offender_id,
-    status,
-    subtotal,
-    tax,
-    total,
-    expected_delivery_date,
-    barcode
-  ) VALUES (
-    v_order_num,
-    v_offender.facility_id,
-    v_offender_id,
-    'PROCESSING',
-    v_subtotal,
-    0.00,
-    v_subtotal,
-    v_delivery_date,
-    v_barcode
-  ) RETURNING id INTO v_order_id;
+  -- Atomic Sequence-driven Order Number & Barcode generation with concurrency retry protection
+  LOOP
+    BEGIN
+      v_seq_val := nextval('public.order_number_seq');
+      v_order_num := '#CC-' || LPAD(v_seq_val::TEXT, 5, '0');
+      v_barcode := 'BC-' || SUBSTRING(v_order_num FROM 2) || '-' || TO_CHAR(now(), 'YYYYMMDD');
+
+      INSERT INTO public.orders (
+        order_number,
+        facility_id,
+        offender_id,
+        status,
+        subtotal,
+        tax,
+        total,
+        expected_delivery_date,
+        barcode
+      ) VALUES (
+        v_order_num,
+        v_offender.facility_id,
+        v_offender_id,
+        'PROCESSING',
+        v_subtotal,
+        0.00,
+        v_subtotal,
+        v_delivery_date,
+        v_barcode
+      ) RETURNING id INTO v_order_id;
+
+      EXIT; -- Succeeded
+    EXCEPTION WHEN unique_violation THEN
+      v_retry_count := v_retry_count + 1;
+      IF v_retry_count > 5 THEN
+        RAISE EXCEPTION 'Concurrency conflict generating order identifier. Please retry.';
+      END IF;
+    END;
+  END LOOP;
 
   FOR v_item IN
     SELECT
@@ -1491,6 +1505,7 @@ GRANT EXECUTE ON FUNCTION public.is_family_authorized_for_offender(UUID, TEXT) T
 GRANT EXECUTE ON FUNCTION public.verify_inmate_pin(TEXT, TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.search_offender_for_family(TEXT, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.place_inmate_order(JSONB) TO authenticated;
+GRANT USAGE, SELECT ON SEQUENCE public.order_number_seq TO authenticated;
 
 -- PRIVILEGED FUNCTION: Restricted exclusively to service_role
 GRANT EXECUTE ON FUNCTION public.process_confirmed_touchpay_deposit(TEXT, TEXT, NUMERIC, TEXT) TO service_role;
