@@ -5,7 +5,7 @@
 -- security triggers, and RPC caller gating using PostgreSQL role switching.
 --
 -- TARGET ENVIRONMENT:
--- - Run in a LOCAL SUPABASE TEST ENVIRONMENT or a DEDICATED STAGING PROJECT.
+-- - Run in a LOCAL SUPABASE TEST ENVIRONMENT or a DEDICATED ISOLATED STAGING PROJECT.
 -- - DO NOT run against a production database:
 --   1. Sequence calls (nextval) are non-transactional and will NOT be rolled back.
 --   2. Incomplete or interrupted execution could leave test fixtures in place.
@@ -56,8 +56,28 @@ BEGIN
          (v_fac2_id, 'Westside Correctional Center (Test)', 1, 100.00)
   ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, max_weekly_spend = EXCLUDED.max_weekly_spend;
 
-  -- Create dummy auth users satisfying GoTrue schema constraints
+  -- Safety Verification: Ensure test emails do not collide with existing auth.users under different IDs
   IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'auth' AND tablename = 'users') THEN
+    IF EXISTS (
+      SELECT 1 FROM auth.users
+      WHERE email IN (
+        'test_inmate_a_rls@canteen.test', 'test_inmate_b_rls@canteen.test',
+        'test_family_1_rls@canteen.test', 'test_family_2_rls@canteen.test',
+        'test_staff_fac1_rls@canteen.test', 'test_staff_fac2_rls@canteen.test'
+      )
+      AND id NOT IN (
+        v_inmate_a_uid, v_inmate_b_uid, v_family_1_uid,
+        v_family_2_uid, v_staff_fac1_uid, v_staff_fac2_uid
+      )
+    ) THEN
+      RAISE EXCEPTION 'SAFETY HALT: Unique email collision detected in auth.users with different user IDs. Test suite must run in an isolated test database.';
+    END IF;
+
+    -- Clean up prior test rows from previous aborted runs (strictly scoped to test UUIDs)
+    DELETE FROM public.user_profiles WHERE id IN (v_inmate_a_uid, v_inmate_b_uid, v_family_1_uid, v_family_2_uid, v_staff_fac1_uid, v_staff_fac2_uid);
+    DELETE FROM auth.users WHERE id IN (v_inmate_a_uid, v_inmate_b_uid, v_family_1_uid, v_family_2_uid, v_staff_fac1_uid, v_staff_fac2_uid);
+
+    -- Create dummy auth users satisfying GoTrue schema constraints
     INSERT INTO auth.users (
       id, instance_id, aud, role, email, encrypted_password,
       email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data
@@ -68,8 +88,7 @@ BEGIN
       (v_family_1_uid, '00000000-0000-0000-0000-000000000000'::uuid, 'authenticated', 'authenticated', 'test_family_1_rls@canteen.test', crypt('testpass', gen_salt('bf')), now(), now(), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb),
       (v_family_2_uid, '00000000-0000-0000-0000-000000000000'::uuid, 'authenticated', 'authenticated', 'test_family_2_rls@canteen.test', crypt('testpass', gen_salt('bf')), now(), now(), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb),
       (v_staff_fac1_uid, '00000000-0000-0000-0000-000000000000'::uuid, 'authenticated', 'authenticated', 'test_staff_fac1_rls@canteen.test', crypt('testpass', gen_salt('bf')), now(), now(), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb),
-      (v_staff_fac2_uid, '00000000-0000-0000-0000-000000000000'::uuid, 'authenticated', 'authenticated', 'test_staff_fac2_rls@canteen.test', crypt('testpass', gen_salt('bf')), now(), now(), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb)
-    ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email;
+      (v_staff_fac2_uid, '00000000-0000-0000-0000-000000000000'::uuid, 'authenticated', 'authenticated', 'test_staff_fac2_rls@canteen.test', crypt('testpass', gen_salt('bf')), now(), now(), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb);
   END IF;
 
   -- Insert User Profiles
@@ -479,17 +498,20 @@ DECLARE
   v_self_approve_blocked BOOLEAN := false;
   v_pending_request_allowed BOOLEAN := false;
   v_status_elevate_blocked BOOLEAN := false;
-  v_current_status TEXT;
+  v_stored_status TEXT;
+  v_err_code TEXT := '';
+  v_err_msg TEXT := '';
 BEGIN
   RESET ROLE;
   PERFORM set_config('request.jwt.claims', '{"sub": "dddd4444-dddd-4444-dddd-444444444444", "role": "authenticated"}', true);
   SET LOCAL ROLE authenticated;
 
-  -- Attempt 1: Insert link with status = APPROVED (Self-approval attack - must fail)
+  -- Attempt 1: Insert link with status = APPROVED (Self-approval attack - must fail via RLS WITH CHECK or trigger)
   BEGIN
     INSERT INTO public.family_offender_links (family_account_id, offender_id, status, relationship)
     VALUES ('77777777-7777-7777-7777-777777777772', 'A1234567', 'APPROVED', 'Friend');
   EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err_code = RETURNED_SQLSTATE, v_err_msg = MESSAGE_TEXT;
     v_self_approve_blocked := true;
   END;
 
@@ -508,26 +530,33 @@ BEGIN
     SET status = 'APPROVED'
     WHERE family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'A1234567';
   EXCEPTION WHEN OTHERS THEN
+    -- If an exception was raised, the trigger or permission blocked it
     v_status_elevate_blocked := true;
   END;
 
-  -- If no exception was thrown, verify that RLS silently blocked the update (status is still PENDING)
-  IF NOT v_status_elevate_blocked THEN
-    SELECT status INTO v_current_status
-    FROM public.family_offender_links
-    WHERE family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'A1234567';
+  -- Crucial Verification Step:
+  -- Reset role to postgres (trusted superuser context) to bypass RLS and query the true physical state.
+  -- A zero-row SELECT under authenticated RLS must NEVER be treated as proof of success.
+  RESET ROLE;
 
-    IF v_current_status = 'PENDING' THEN
-      v_status_elevate_blocked := true; -- RLS hid the row from family update
-    END IF;
+  SELECT status INTO v_stored_status
+  FROM public.family_offender_links
+  WHERE family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'A1234567';
+
+  IF v_stored_status = 'PENDING' THEN
+    -- The record physically exists and remained strictly PENDING
+    v_status_elevate_blocked := true;
+  ELSE
+    -- If it became APPROVED (or was deleted/missing), elevation was not blocked
+    v_status_elevate_blocked := false;
   END IF;
 
-  RESET ROLE;
   IF v_self_approve_blocked AND v_pending_request_allowed AND v_status_elevate_blocked THEN
-    INSERT INTO test_results VALUES (11, 'Family relationship links require institutional staff approval; self-approval strictly rejected', true, 'Direct APPROVED insert blocked, PENDING allowed, elevation to APPROVED blocked by RLS/trigger');
+    INSERT INTO test_results VALUES (11, 'Family relationship links require institutional staff approval; self-approval strictly rejected', true, 'Direct APPROVED insert blocked; PENDING allowed; elevation to APPROVED blocked (verified status remains PENDING in database)');
   ELSE
     INSERT INTO test_results VALUES (11, 'Family relationship link integrity breached', false,
-      format('Self-approve blocked: %s, Pending allowed: %s, Elevate blocked: %s', v_self_approve_blocked, v_pending_request_allowed, v_status_elevate_blocked));
+      format('Self-approve blocked: %s, Pending allowed: %s, Stored status: %s (Elevate blocked: %s)',
+             v_self_approve_blocked, v_pending_request_allowed, v_stored_status, v_status_elevate_blocked));
   END IF;
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE;
@@ -564,16 +593,29 @@ END $$;
 -- ==============================================================================
 DO $$
 DECLARE
+  v_inmate_a_bal_before NUMERIC(10, 2);
+  v_inmate_b_bal_before NUMERIC(10, 2);
+  v_inmate_a_bal_after NUMERIC(10, 2);
+  v_inmate_b_bal_after NUMERIC(10, 2);
   v_order_res JSONB;
+  v_created_order_id UUID;
+  v_order_offender_id TEXT;
   v_spoof_prevented BOOLEAN := false;
+  v_balance_integrity_ok BOOLEAN := false;
   v_unauthorized_blocked BOOLEAN := false;
+  v_anon_blocked BOOLEAN := false;
   v_err_code TEXT := '';
   v_err_msg TEXT := '';
 BEGIN
   RESET ROLE;
 
-  -- Subtest A: Authenticated Inmate A attempts to supply p_offender_id = 'B7654321' (Inmate B)
-  -- The function must ignore 'B7654321' and strictly order for Inmate A (A1234567) derived from session
+  -- 1. Snapshot balances as postgres before order placement
+  SELECT balance INTO v_inmate_a_bal_before FROM public.offenders WHERE id = 'A1234567';
+  SELECT balance INTO v_inmate_b_bal_before FROM public.offenders WHERE id = 'B7654321';
+
+  -- 2. Subtest A: Authenticated Inmate A calls place_inmate_order attempting to spoof Inmate B (p_offender_id = 'B7654321')
+  -- When auth.role() = 'authenticated', place_inmate_order ignores p_offender_id and strictly orders for Inmate A
+  -- (derived from current_inmate_offender_id()).
   PERFORM set_config('request.jwt.claims', '{"sub": "aaaa1111-aaaa-1111-aaaa-111111111111", "role": "authenticated"}', true);
   SET LOCAL ROLE authenticated;
 
@@ -581,13 +623,27 @@ BEGIN
     jsonb_build_array(jsonb_build_object('productId', '88888888-8888-8888-8888-888888888881', 'quantity', 1)),
     'B7654321'
   );
+  v_created_order_id := (v_order_res->>'orderId')::UUID;
 
+  -- 3. Reset role to postgres to verify physical database state
   RESET ROLE;
-  IF EXISTS (SELECT 1 FROM public.orders WHERE id = (v_order_res->>'orderId')::UUID AND offender_id = 'A1234567') THEN
+
+  SELECT offender_id INTO v_order_offender_id FROM public.orders WHERE id = v_created_order_id;
+  SELECT balance INTO v_inmate_a_bal_after FROM public.offenders WHERE id = 'A1234567';
+  SELECT balance INTO v_inmate_b_bal_after FROM public.offenders WHERE id = 'B7654321';
+
+  -- Confirm the order belongs to Inmate A ('A1234567') and NOT Inmate B ('B7654321')
+  IF v_order_offender_id = 'A1234567' THEN
     v_spoof_prevented := true;
   END IF;
 
-  -- Subtest B: Authenticated Family User 1 attempts to call place_inmate_order() (must fail with UNAUTHORIZED)
+  -- Confirm Inmate A's balance was deducted ($2.50 for soap: 82.50 -> 80.00)
+  -- and Inmate B's balance was completely UNTOUCHED (remains 50.00)
+  IF v_inmate_a_bal_after = (v_inmate_a_bal_before - 2.50) AND v_inmate_b_bal_after = v_inmate_b_bal_before THEN
+    v_balance_integrity_ok := true;
+  END IF;
+
+  -- 4. Subtest B: Authenticated Family User 1 attempts to call place_inmate_order() (must fail with UNAUTHORIZED)
   PERFORM set_config('request.jwt.claims', '{"sub": "cccc3333-cccc-3333-cccc-333333333333", "role": "authenticated"}', true);
   SET LOCAL ROLE authenticated;
 
@@ -603,12 +659,33 @@ BEGIN
     END IF;
   END;
 
+  -- 5. Subtest C: Anonymous (anon) caller attempts to invoke place_inmate_order() (must be denied)
   RESET ROLE;
-  IF v_spoof_prevented AND v_unauthorized_blocked THEN
-    INSERT INTO test_results VALUES (13, 'Inmate order placement anti-spoofing and role gates enforced', true, 'Supplied offender_id B7654321 was ignored (order created for A1234567); Non-inmate caller rejected');
+  PERFORM set_config('request.jwt.claims', '', true);
+  SET LOCAL ROLE anon;
+
+  BEGIN
+    PERFORM public.place_inmate_order(
+      jsonb_build_array(jsonb_build_object('productId', '88888888-8888-8888-8888-888888888881', 'quantity', 1)),
+      'A1234567'
+    );
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err_code = RETURNED_SQLSTATE, v_err_msg = MESSAGE_TEXT;
+    -- Blocked either by grant revocation (42501) or caller role check
+    IF v_err_code = '42501' OR v_err_msg ILIKE '%UNAUTHORIZED%' OR v_err_msg ILIKE '%permission denied%' THEN
+      v_anon_blocked := true;
+    END IF;
+  END;
+
+  RESET ROLE;
+  IF v_spoof_prevented AND v_balance_integrity_ok AND v_unauthorized_blocked AND v_anon_blocked THEN
+    INSERT INTO test_results VALUES (13, 'Inmate order placement anti-spoofing, balance integrity, and role gates enforced', true,
+      format('Spoofed ID ignored (order assigned to A1234567); Inmate A debited $2.50 (bal: $%s -> $%s); Inmate B untouched ($%s); Family and Anon rejected',
+             v_inmate_a_bal_before, v_inmate_a_bal_after, v_inmate_b_bal_after));
   ELSE
     INSERT INTO test_results VALUES (13, 'Inmate order placement security gate breached', false,
-      format('Spoof prevented: %s, Unauthorized role blocked: %s', v_spoof_prevented, v_unauthorized_blocked));
+      format('Spoof prevented: %s, Balance integrity: %s (A: %s->%s, B: %s->%s), Family blocked: %s, Anon blocked: %s',
+             v_spoof_prevented, v_balance_integrity_ok, v_inmate_a_bal_before, v_inmate_a_bal_after, v_inmate_b_bal_before, v_inmate_b_bal_after, v_unauthorized_blocked, v_anon_blocked));
   END IF;
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE;
