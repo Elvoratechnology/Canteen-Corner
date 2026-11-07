@@ -575,7 +575,16 @@ CREATE POLICY "facilities_select_authenticated" ON public.facilities
   USING (
     id = public.current_user_facility()
     OR (public.current_user_role() = 'ADMIN' AND public.current_user_facility() IS NULL)
-    OR public.current_user_role() = 'FAMILY'
+    OR (
+      public.current_user_role() = 'FAMILY'
+      AND EXISTS (
+        SELECT 1 FROM public.family_offender_links fol
+        JOIN public.offenders o ON o.id = fol.offender_id
+        WHERE fol.family_account_id = public.current_family_account_id()
+          AND fol.status = 'APPROVED'
+          AND o.facility_id = facilities.id
+      )
+    )
   );
 
 DROP POLICY IF EXISTS "facilities_update_admin" ON public.facilities;
@@ -1013,7 +1022,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
--- 9.2 SAFE OFFENDER LOOKUP FOR FAMILY PORTAL
+-- 9.2 SAFE OFFENDER LOOKUP FOR FAMILY PORTAL (STRICT APPROVED LINK ENFORCEMENT)
+-- Prevents inmate roster enumeration: only returns offenders with an APPROVED family_offender_link
 CREATE OR REPLACE FUNCTION public.search_offender_for_family(
   search_term TEXT,
   target_facility_id UUID DEFAULT NULL
@@ -1028,11 +1038,11 @@ RETURNS TABLE (
 ) AS $$
 BEGIN
   IF public.current_user_role() NOT IN ('FAMILY', 'ADMIN') THEN
-    RAISE EXCEPTION 'Access Denied: Inmate search is restricted to authorized family accounts.';
+    RAISE EXCEPTION 'Access Denied: Inmate lookup is restricted to authorized family accounts.';
   END IF;
 
   IF search_term IS NULL OR LENGTH(TRIM(search_term)) < 2 THEN
-    RAISE EXCEPTION 'Search term must be at least 2 characters.';
+    RETURN;
   END IF;
 
   RETURN QUERY
@@ -1050,6 +1060,15 @@ BEGIN
     AND (
       UPPER(o.id) = UPPER(TRIM(search_term))
       OR o.name ILIKE ('%' || TRIM(search_term) || '%')
+    )
+    AND (
+      public.current_user_role() = 'ADMIN'
+      OR EXISTS (
+        SELECT 1 FROM public.family_offender_links fol
+        WHERE fol.family_account_id = public.current_family_account_id()
+          AND fol.offender_id = o.id
+          AND fol.status = 'APPROVED'
+      )
     )
   LIMIT 5;
 END;
@@ -1377,8 +1396,7 @@ BEGIN
 
   IF v_deposit.amount != p_verified_amount THEN
     UPDATE public.deposits
-    SET status = 'FAILED',
-        updated_at = now()
+    SET status = 'FAILED'
     WHERE id = v_deposit.id;
 
     INSERT INTO public.audit_logs (
@@ -1387,12 +1405,22 @@ BEGIN
       'TOUCHPAY_AMOUNT_MISMATCH_FRAUD', 'TOUCHPAY_GATEWAY', 'SYSTEM', v_deposit.facility_id, 'DEPOSIT', p_provider_ref,
       jsonb_build_object(
         'recorded_amount', v_deposit.amount,
-        'verified_amount', p_verified_amount
+        'verified_amount', p_verified_amount,
+        'status', 'FAILED',
+        'reason', 'Amount mismatch between recorded intent and verified gateway payload'
       )
     );
 
-    RAISE EXCEPTION 'Deposit amount mismatch: recorded $%, gateway verified $%. Deposit marked FAILED.',
-      v_deposit.amount, p_verified_amount;
+    -- Safe committed failure: Transaction commits FAILED deposit state and audit log without crediting balance
+    RETURN jsonb_build_object(
+      'processed', false,
+      'alreadyProcessed', false,
+      'status', 'FAILED',
+      'error', 'AMOUNT_MISMATCH',
+      'message', 'Security Alert: Deposit amount mismatch. Deposit marked FAILED and no funds were credited.',
+      'recordedAmount', v_deposit.amount,
+      'verifiedAmount', p_verified_amount
+    );
   END IF;
 
   SELECT * INTO v_offender
