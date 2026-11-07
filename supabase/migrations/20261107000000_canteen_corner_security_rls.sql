@@ -1,6 +1,7 @@
 -- ==============================================================================
 -- CANTEEN CORNER — SECURE DATABASE ARCHITECTURE & ROW LEVEL SECURITY (RLS)
 -- Multi-Tenant Correctional Facility Commissary Platform
+-- Hardened Security Remediation Version
 -- ==============================================================================
 
 -- 1. EXTENSIONS
@@ -54,10 +55,10 @@ EXCEPTION
 END $$;
 
 -- ==============================================================================
--- 3. CORE TABLES
+-- 3. CORE TABLES & CONSTRAINTS
 -- ==============================================================================
 
--- Facilities (Multi-tenant partition root)
+-- 3.1 Facilities (Multi-tenant partition root)
 CREATE TABLE IF NOT EXISTS public.facilities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
@@ -69,7 +70,7 @@ CREATE TABLE IF NOT EXISTS public.facilities (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- User Profiles (Linked 1:1 to Supabase auth.users)
+-- 3.2 User Profiles (Linked 1:1 to Supabase auth.users)
 CREATE TABLE IF NOT EXISTS public.user_profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   facility_id UUID REFERENCES public.facilities(id) ON DELETE RESTRICT,
@@ -82,7 +83,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Offenders (Inmates)
+-- 3.3 Offenders (Inmates)
 CREATE TABLE IF NOT EXISTS public.offenders (
   id TEXT PRIMARY KEY, -- Institutional Offender ID, e.g. "A1234567"
   user_id UUID UNIQUE REFERENCES public.user_profiles(id) ON DELETE SET NULL,
@@ -95,13 +96,14 @@ CREATE TABLE IF NOT EXISTS public.offenders (
   weekly_limit NUMERIC(10, 2) NOT NULL DEFAULT 100.00 CHECK (weekly_limit >= 0.00),
   current_weekly_spent NUMERIC(10, 2) NOT NULL DEFAULT 0.00 CHECK (current_weekly_spent >= 0.00),
   last_weekly_reset TIMESTAMPTZ NOT NULL DEFAULT now(),
-  failed_pin_attempts INTEGER NOT NULL DEFAULT 0,
+  failed_pin_attempts INTEGER NOT NULL DEFAULT 0 CHECK (failed_pin_attempts >= 0),
   pin_locked_until TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_offender_weekly_spent CHECK (current_weekly_spent <= weekly_limit)
 );
 
--- Family & Friends Accounts
+-- 3.4 Family & Friends Accounts
 CREATE TABLE IF NOT EXISTS public.family_accounts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL UNIQUE REFERENCES public.user_profiles(id) ON DELETE CASCADE,
@@ -111,7 +113,7 @@ CREATE TABLE IF NOT EXISTS public.family_accounts (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Commissary Product Catalog
+-- 3.5 Commissary Product Catalog
 CREATE TABLE IF NOT EXISTS public.products (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   facility_id UUID REFERENCES public.facilities(id) ON DELETE RESTRICT,
@@ -128,7 +130,7 @@ CREATE TABLE IF NOT EXISTS public.products (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Manifests (Delivery batches grouped by unit and date)
+-- 3.6 Manifests (Delivery batches grouped by unit and date)
 CREATE TABLE IF NOT EXISTS public.manifests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   manifest_number TEXT NOT NULL UNIQUE,
@@ -137,12 +139,12 @@ CREATE TABLE IF NOT EXISTS public.manifests (
   housing TEXT,
   delivery_date DATE NOT NULL,
   status TEXT NOT NULL DEFAULT 'GENERATED',
-  total_orders INTEGER NOT NULL DEFAULT 0,
-  total_items INTEGER NOT NULL DEFAULT 0,
+  total_orders INTEGER NOT NULL DEFAULT 0 CHECK (total_orders >= 0),
+  total_items INTEGER NOT NULL DEFAULT 0 CHECK (total_items >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Orders
+-- 3.7 Orders
 CREATE TABLE IF NOT EXISTS public.orders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_number TEXT NOT NULL UNIQUE,
@@ -162,7 +164,7 @@ CREATE TABLE IF NOT EXISTS public.orders (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Order Items
+-- 3.8 Order Items
 CREATE TABLE IF NOT EXISTS public.order_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id UUID NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
@@ -172,7 +174,7 @@ CREATE TABLE IF NOT EXISTS public.order_items (
   total_price NUMERIC(10, 2) NOT NULL CHECK (total_price >= 0.00)
 );
 
--- Order Status Audit History
+-- 3.9 Order Status Audit History
 CREATE TABLE IF NOT EXISTS public.order_status_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id UUID NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
@@ -183,7 +185,7 @@ CREATE TABLE IF NOT EXISTS public.order_status_history (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Trust Fund Deposits (TouchPay Exclusive)
+-- 3.10 Trust Fund Deposits (TouchPay Exclusive)
 CREATE TABLE IF NOT EXISTS public.deposits (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   facility_id UUID NOT NULL REFERENCES public.facilities(id) ON DELETE RESTRICT,
@@ -192,7 +194,8 @@ CREATE TABLE IF NOT EXISTS public.deposits (
   amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0.00),
   fee NUMERIC(10, 2) NOT NULL DEFAULT 0.00 CHECK (fee >= 0.00),
   total_paid NUMERIC(10, 2) NOT NULL CHECK (total_paid >= amount),
-  provider TEXT NOT NULL DEFAULT 'TOUCHPAY',
+  currency TEXT NOT NULL DEFAULT 'USD' CHECK (currency = 'USD'),
+  provider TEXT NOT NULL DEFAULT 'TOUCHPAY' CHECK (provider = 'TOUCHPAY'),
   provider_ref TEXT NOT NULL UNIQUE,
   status deposit_status NOT NULL DEFAULT 'PENDING',
   idempotency_key TEXT NOT NULL UNIQUE,
@@ -200,7 +203,7 @@ CREATE TABLE IF NOT EXISTS public.deposits (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Double-Entry Financial Ledger (Immutable append-only balance audit trail)
+-- 3.11 Double-Entry Financial Ledger (Immutable append-only balance audit trail)
 CREATE TABLE IF NOT EXISTS public.ledger_entries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   facility_id UUID NOT NULL REFERENCES public.facilities(id) ON DELETE RESTRICT,
@@ -213,10 +216,15 @@ CREATE TABLE IF NOT EXISTS public.ledger_entries (
   reference_type TEXT NOT NULL, -- ORDER, DEPOSIT, MANUAL
   reference_id TEXT NOT NULL,
   description TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_ledger_entry_math CHECK (
+    (credit > 0.00 AND debit = 0.00 AND balance_after = balance_before + credit) OR
+    (debit > 0.00 AND credit = 0.00 AND balance_after = balance_before - debit) OR
+    (credit = 0.00 AND debit = 0.00 AND balance_after = balance_before)
+  )
 );
 
--- Care Gift Packages
+-- 3.12 Care Gift Packages
 CREATE TABLE IF NOT EXISTS public.gift_packages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   facility_id UUID NOT NULL REFERENCES public.facilities(id) ON DELETE RESTRICT,
@@ -232,7 +240,7 @@ CREATE TABLE IF NOT EXISTS public.gift_packages (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Inmate Notifications
+-- 3.13 Inmate Notifications
 CREATE TABLE IF NOT EXISTS public.notifications (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   offender_id TEXT REFERENCES public.offenders(id) ON DELETE CASCADE,
@@ -244,7 +252,7 @@ CREATE TABLE IF NOT EXISTS public.notifications (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Warehouse Picking Lists
+-- 3.14 Warehouse Picking Lists
 CREATE TABLE IF NOT EXISTS public.picking_lists (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id UUID NOT NULL UNIQUE REFERENCES public.orders(id) ON DELETE CASCADE,
@@ -254,7 +262,7 @@ CREATE TABLE IF NOT EXISTS public.picking_lists (
   completed_at TIMESTAMPTZ
 );
 
--- System & Security Audit Logs (Append-Only)
+-- 3.15 System & Security Audit Logs (Append-Only)
 CREATE TABLE IF NOT EXISTS public.audit_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   action TEXT NOT NULL,
@@ -269,7 +277,76 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
 );
 
 -- ==============================================================================
--- 4. SECURITY & AUTHENTICATION HELPER FUNCTIONS
+-- 4. PERFORMANCE & SECURITY INDEXES
+-- ==============================================================================
+
+CREATE INDEX IF NOT EXISTS idx_user_profiles_facility ON public.user_profiles(facility_id);
+CREATE INDEX IF NOT EXISTS idx_offenders_facility ON public.offenders(facility_id);
+CREATE INDEX IF NOT EXISTS idx_offenders_user_id ON public.offenders(user_id);
+CREATE INDEX IF NOT EXISTS idx_products_facility ON public.products(facility_id) WHERE active = true;
+CREATE INDEX IF NOT EXISTS idx_orders_offender_id ON public.orders(offender_id);
+CREATE INDEX IF NOT EXISTS idx_orders_facility_status ON public.orders(facility_id, status);
+CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON public.order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_deposits_offender_status ON public.deposits(offender_id, status);
+CREATE INDEX IF NOT EXISTS idx_deposits_provider_ref ON public.deposits(provider_ref);
+CREATE INDEX IF NOT EXISTS idx_deposits_idempotency ON public.deposits(idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_ledger_offender ON public.ledger_entries(offender_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_facility_action ON public.audit_logs(facility_id, action, created_at DESC);
+
+-- ==============================================================================
+-- 5. CROSS-ENTITY FACILITY CONSISTENCY TRIGGERS
+-- ==============================================================================
+
+-- 5.1 Enforce facility match between Order and Offender
+CREATE OR REPLACE FUNCTION public.check_order_facility_consistency()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_offender_facility UUID;
+BEGIN
+  SELECT facility_id INTO v_offender_facility
+  FROM public.offenders
+  WHERE id = NEW.offender_id;
+
+  IF v_offender_facility IS NULL OR v_offender_facility != NEW.facility_id THEN
+    RAISE EXCEPTION 'SECURITY VIOLATION: Order facility (%) does not match offender facility (%).',
+      NEW.facility_id, v_offender_facility;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+DROP TRIGGER IF EXISTS trg_order_facility_consistency ON public.orders;
+CREATE TRIGGER trg_order_facility_consistency
+  BEFORE INSERT OR UPDATE OF facility_id, offender_id ON public.orders
+  FOR EACH ROW
+  EXECUTE FUNCTION public.check_order_facility_consistency();
+
+-- 5.2 Enforce facility match between Deposit and Offender
+CREATE OR REPLACE FUNCTION public.check_deposit_facility_consistency()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_offender_facility UUID;
+BEGIN
+  SELECT facility_id INTO v_offender_facility
+  FROM public.offenders
+  WHERE id = NEW.offender_id;
+
+  IF v_offender_facility IS NULL OR v_offender_facility != NEW.facility_id THEN
+    RAISE EXCEPTION 'SECURITY VIOLATION: Deposit facility (%) does not match offender facility (%).',
+      NEW.facility_id, v_offender_facility;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+DROP TRIGGER IF EXISTS trg_deposit_facility_consistency ON public.deposits;
+CREATE TRIGGER trg_deposit_facility_consistency
+  BEFORE INSERT OR UPDATE OF facility_id, offender_id ON public.deposits
+  FOR EACH ROW
+  EXECUTE FUNCTION public.check_deposit_facility_consistency();
+
+-- ==============================================================================
+-- 6. SECURITY & AUTHENTICATION HELPER FUNCTIONS
 -- ==============================================================================
 
 -- Helper: Get current user's profile record
@@ -313,14 +390,14 @@ RETURNS UUID AS $$
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ==============================================================================
--- 5. IMMUTABLE ROLE INTEGRITY & PRIVILEGE ELEVATION PROTECTION
+-- 7. IMMUTABLE ROLE INTEGRITY & PRIVILEGE ELEVATION PROTECTION
 -- ==============================================================================
 
 -- Trigger: Prevent users from assigning or modifying their own roles or facilities
 CREATE OR REPLACE FUNCTION public.prevent_unauthorized_role_change()
 RETURNS TRIGGER AS $$
 BEGIN
-  -- If updated by non-superadmin client, forbid modifying role or facility_id
+  -- If updated by authenticated client, forbid modifying role or facility_id
   IF auth.uid() IS NOT NULL THEN
     IF NEW.role IS DISTINCT FROM OLD.role THEN
       RAISE EXCEPTION 'SECURITY VIOLATION: Role elevation is strictly prohibited.';
@@ -345,7 +422,7 @@ CREATE OR REPLACE FUNCTION public.prevent_direct_balance_tampering()
 RETURNS TRIGGER AS $$
 BEGIN
   -- Direct balance updates via client PostgREST queries are forbidden
-  -- Must use verified SECURITY DEFINER functions (e.g. place_inmate_order, process_deposit)
+  -- Must use verified SECURITY DEFINER functions (place_inmate_order, process_confirmed_touchpay_deposit)
   IF current_setting('canteen.authorized_transaction', true) IS DISTINCT FROM 'true' THEN
     IF NEW.balance IS DISTINCT FROM OLD.balance OR NEW.current_weekly_spent IS DISTINCT FROM OLD.current_weekly_spent THEN
       RAISE EXCEPTION 'SECURITY VIOLATION: Inmate balances can only be updated via verified financial transaction functions.';
@@ -382,11 +459,17 @@ CREATE TRIGGER trg_immutable_ledger
   FOR EACH ROW
   EXECUTE FUNCTION public.prevent_audit_tampering();
 
+DROP TRIGGER IF EXISTS trg_immutable_status_history ON public.order_status_history;
+CREATE TRIGGER trg_immutable_status_history
+  BEFORE UPDATE OR DELETE ON public.order_status_history
+  FOR EACH ROW
+  EXECUTE FUNCTION public.prevent_audit_tampering();
+
 -- ==============================================================================
--- 6. ROW LEVEL SECURITY (RLS) POLICIES ON EVERY TABLE
+-- 8. ROW LEVEL SECURITY (RLS) POLICIES ON EVERY TABLE
 -- ==============================================================================
 
--- Enable and FORCE RLS on every table
+-- Enable and FORCE RLS on every table (Forces RLS even for table owners)
 ALTER TABLE public.facilities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.facilities FORCE ROW LEVEL SECURITY;
 
@@ -433,9 +516,9 @@ ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs FORCE ROW LEVEL SECURITY;
 
 -- ------------------------------------------------------------------------------
--- 6.1 FACILITIES POLICIES
+-- 8.1 FACILITIES POLICIES
 -- ------------------------------------------------------------------------------
--- Anyone authenticated can view facilities they belong to; public can view active facility list
+-- Users can view facilities they belong to or are searching in
 CREATE POLICY "facilities_select_authenticated" ON public.facilities
   FOR SELECT TO authenticated
   USING (
@@ -444,14 +527,14 @@ CREATE POLICY "facilities_select_authenticated" ON public.facilities
     OR public.current_user_role() = 'FAMILY'
   );
 
--- Only platform admins can modify facility settings
+-- Only platform admins can modify facility settings within their facility
 CREATE POLICY "facilities_update_admin" ON public.facilities
   FOR UPDATE TO authenticated
   USING (id = public.current_user_facility() AND public.current_user_role() = 'ADMIN')
   WITH CHECK (id = public.current_user_facility() AND public.current_user_role() = 'ADMIN');
 
 -- ------------------------------------------------------------------------------
--- 6.2 USER PROFILES POLICIES
+-- 8.2 USER PROFILES POLICIES
 -- ------------------------------------------------------------------------------
 -- Users can view their own profile; staff/admins can view profiles within their facility
 CREATE POLICY "profiles_select_self_or_facility" ON public.user_profiles
@@ -464,16 +547,16 @@ CREATE POLICY "profiles_select_self_or_facility" ON public.user_profiles
     )
   );
 
--- Users can only update their own non-sensitive fields
+-- Users can only update their own non-sensitive fields (trigger blocks role/facility changes)
 CREATE POLICY "profiles_update_self" ON public.user_profiles
   FOR UPDATE TO authenticated
   USING (id = auth.uid())
   WITH CHECK (id = auth.uid());
 
 -- ------------------------------------------------------------------------------
--- 6.3 OFFENDERS POLICIES
+-- 8.3 OFFENDERS POLICIES
 -- ------------------------------------------------------------------------------
--- Inmates: can only view their OWN record
+-- Inmates: can only view their OWN record (pin_hash is column-revoked from client SELECT)
 -- Warehouse / Admins: can view offenders in their assigned facility
 CREATE POLICY "offenders_select" ON public.offenders
   FOR SELECT TO authenticated
@@ -485,7 +568,7 @@ CREATE POLICY "offenders_select" ON public.offenders
     )
   );
 
--- Offender updates (e.g. housing or unit updates by facility admin)
+-- Facility Admin can update non-financial fields (unit, housing)
 CREATE POLICY "offenders_update_admin" ON public.offenders
   FOR UPDATE TO authenticated
   USING (
@@ -498,13 +581,13 @@ CREATE POLICY "offenders_update_admin" ON public.offenders
   );
 
 -- ------------------------------------------------------------------------------
--- 6.4 FAMILY ACCOUNTS POLICIES
+-- 8.4 FAMILY ACCOUNTS POLICIES
 -- ------------------------------------------------------------------------------
 CREATE POLICY "family_accounts_select" ON public.family_accounts
   FOR SELECT TO authenticated
   USING (
     user_id = auth.uid()
-    OR public.current_user_role() = 'ADMIN'
+    OR (public.current_user_role() = 'ADMIN')
   );
 
 CREATE POLICY "family_accounts_insert" ON public.family_accounts
@@ -517,12 +600,19 @@ CREATE POLICY "family_accounts_update" ON public.family_accounts
   WITH CHECK (user_id = auth.uid());
 
 -- ------------------------------------------------------------------------------
--- 6.5 PRODUCTS POLICIES
+-- 8.5 PRODUCTS POLICIES
 -- ------------------------------------------------------------------------------
--- Active catalog products are visible to all authenticated users
+-- Active catalog products are visible to authenticated users in their facility or global staples
 CREATE POLICY "products_select_active" ON public.products
   FOR SELECT TO authenticated
-  USING (active = true OR public.current_user_role() IN ('ADMIN', 'WAREHOUSE_SUPERVISOR', 'WAREHOUSE_PICKER'));
+  USING (
+    active = true
+    AND (
+      facility_id IS NULL
+      OR facility_id = public.current_user_facility()
+      OR public.current_user_role() = 'FAMILY'
+    )
+  );
 
 -- Catalog management restricted to Warehouse Supervisor and Admin in their facility
 CREATE POLICY "products_modify_staff" ON public.products
@@ -537,7 +627,7 @@ CREATE POLICY "products_modify_staff" ON public.products
   );
 
 -- ------------------------------------------------------------------------------
--- 6.6 ORDERS & ORDER ITEMS POLICIES
+-- 8.6 ORDERS & ORDER ITEMS POLICIES
 -- ------------------------------------------------------------------------------
 -- Inmates: view only their own orders
 -- Warehouse staff / Admin: view orders within their assigned facility
@@ -551,7 +641,7 @@ CREATE POLICY "orders_select" ON public.orders
     )
   );
 
--- Warehouse staff can update order status (pick, pack, dispatch) within their facility
+-- Warehouse staff can update order fulfillment status within their assigned facility
 CREATE POLICY "orders_update_warehouse" ON public.orders
   FOR UPDATE TO authenticated
   USING (
@@ -598,10 +688,10 @@ CREATE POLICY "order_status_history_select" ON public.order_status_history
   );
 
 -- ------------------------------------------------------------------------------
--- 6.7 DEPOSITS POLICIES (TOUCHPAY)
+-- 8.7 DEPOSITS POLICIES (TOUCHPAY)
 -- ------------------------------------------------------------------------------
 -- Inmates: view confirmed deposits to their account
--- Family: view deposits made by their family account
+-- Family: view deposits initiated by their own family account
 -- Admin: view facility deposits
 CREATE POLICY "deposits_select" ON public.deposits
   FOR SELECT TO authenticated
@@ -611,7 +701,8 @@ CREATE POLICY "deposits_select" ON public.deposits
     OR (public.current_user_role() = 'ADMIN' AND facility_id = public.current_user_facility())
   );
 
--- Family can initiate a PENDING deposit (Strictly PENDING; never directly SUCCEEDED)
+-- Family can initiate a deposit ONLY with status = 'PENDING'
+-- Directly inserting or updating to 'SUCCEEDED' is blocked
 CREATE POLICY "deposits_insert_family" ON public.deposits
   FOR INSERT TO authenticated
   WITH CHECK (
@@ -619,11 +710,13 @@ CREATE POLICY "deposits_insert_family" ON public.deposits
     AND family_account_id = public.current_family_account_id()
     AND status = 'PENDING'
     AND provider = 'TOUCHPAY'
+    AND currency = 'USD'
     AND amount > 0.00
+    AND total_paid >= amount
   );
 
 -- ------------------------------------------------------------------------------
--- 6.8 FINANCIAL LEDGER POLICIES
+-- 8.8 FINANCIAL LEDGER POLICIES
 -- ------------------------------------------------------------------------------
 -- Inmates: can only view ledger entries for their own trust fund account
 -- Admin: can view ledger for reconciliation in their facility
@@ -634,11 +727,8 @@ CREATE POLICY "ledger_select" ON public.ledger_entries
     OR (public.current_user_role() = 'ADMIN' AND facility_id = public.current_user_facility())
   );
 
--- NO direct INSERT/UPDATE/DELETE on ledger entries for any client role
--- Entries are created strictly by database transaction functions
-
 -- ------------------------------------------------------------------------------
--- 6.9 GIFT PACKAGES POLICIES
+-- 8.9 GIFT PACKAGES POLICIES
 -- ------------------------------------------------------------------------------
 CREATE POLICY "gift_packages_select" ON public.gift_packages
   FOR SELECT TO authenticated
@@ -671,7 +761,7 @@ CREATE POLICY "gift_packages_update_staff" ON public.gift_packages
   );
 
 -- ------------------------------------------------------------------------------
--- 6.10 NOTIFICATIONS POLICIES
+-- 8.10 NOTIFICATIONS POLICIES
 -- ------------------------------------------------------------------------------
 CREATE POLICY "notifications_select" ON public.notifications
   FOR SELECT TO authenticated
@@ -692,7 +782,7 @@ CREATE POLICY "notifications_update_read" ON public.notifications
   );
 
 -- ------------------------------------------------------------------------------
--- 6.11 MANIFESTS & PICKING LISTS POLICIES
+-- 8.11 MANIFESTS & PICKING LISTS POLICIES
 -- ------------------------------------------------------------------------------
 CREATE POLICY "manifests_all_warehouse" ON public.manifests
   FOR ALL TO authenticated
@@ -720,9 +810,8 @@ CREATE POLICY "picking_lists_all_warehouse" ON public.picking_lists
   );
 
 -- ------------------------------------------------------------------------------
--- 6.12 AUDIT LOGS POLICIES
+-- 8.12 AUDIT LOGS POLICIES
 -- ------------------------------------------------------------------------------
--- Admins can view audit logs within their facility only; no client modifications permitted
 CREATE POLICY "audit_logs_select_admin" ON public.audit_logs
   FOR SELECT TO authenticated
   USING (
@@ -731,11 +820,124 @@ CREATE POLICY "audit_logs_select_admin" ON public.audit_logs
   );
 
 -- ==============================================================================
--- 7. SECURE DATABASE FUNCTIONS (SECURITY DEFINER)
+-- 9. SECURE DATABASE FUNCTIONS (SECURITY DEFINER)
 -- ==============================================================================
 
--- 7.1 SAFE OFFENDER LOOKUP FOR FAMILY PORTAL
--- Allows family members to confirm an offender by ID or Name without exposing PIN hashes or balances
+-- 9.1 SAFE INMATE PIN VERIFICATION (Defense Against Brute-Force & Hash Exposure)
+-- Verifies PIN server-side, manages lockout counters, and never returns pin_hash to client
+CREATE OR REPLACE FUNCTION public.verify_inmate_pin(
+  p_offender_id TEXT,
+  p_pin TEXT
+)
+RETURNS JSONB AS $$
+DECLARE
+  v_offender RECORD;
+  v_is_valid BOOLEAN := false;
+  v_max_attempts CONSTANT INTEGER := 3;
+  v_lockout_interval CONSTANT INTERVAL := INTERVAL '15 minutes';
+BEGIN
+  -- Strict input validation
+  IF p_offender_id IS NULL OR TRIM(p_offender_id) = '' OR p_pin IS NULL OR TRIM(p_pin) = '' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Offender ID and PIN are required.');
+  END IF;
+
+  -- Lock offender record for concurrency safety during attempt counting
+  SELECT id, facility_id, name, pin_hash, failed_pin_attempts, pin_locked_until
+  INTO v_offender
+  FROM public.offenders
+  WHERE UPPER(id) = UPPER(TRIM(p_offender_id))
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    -- Return generic error to prevent account enumeration
+    RETURN jsonb_build_object('success', false, 'error', 'Invalid Offender ID or PIN.');
+  END IF;
+
+  -- Check if account is currently locked
+  IF v_offender.pin_locked_until IS NOT NULL AND v_offender.pin_locked_until > now() THEN
+    INSERT INTO public.audit_logs (
+      action, actor_id, actor_role, facility_id, resource_type, resource_id, metadata
+    ) VALUES (
+      'LOGIN_ATTEMPT_LOCKED_ACCOUNT', p_offender_id, 'INMATE', v_offender.facility_id, 'OFFENDER', p_offender_id,
+      jsonb_build_object('locked_until', v_offender.pin_locked_until)
+    );
+
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'Account is locked due to multiple failed attempts. Please try again later or contact unit staff.',
+      'lockedUntil', v_offender.pin_locked_until
+    );
+  END IF;
+
+  -- Cryptographic PIN comparison using pgcrypto crypt()
+  v_is_valid := (crypt(TRIM(p_pin), v_offender.pin_hash) = v_offender.pin_hash);
+
+  IF v_is_valid THEN
+    -- Successful PIN authentication: reset attempt counter & lockout
+    UPDATE public.offenders
+    SET failed_pin_attempts = 0,
+        pin_locked_until = NULL,
+        updated_at = now()
+    WHERE id = v_offender.id;
+
+    INSERT INTO public.audit_logs (
+      action, actor_id, actor_role, facility_id, resource_type, resource_id
+    ) VALUES (
+      'INMATE_LOGIN_SUCCESS', v_offender.id, 'INMATE', v_offender.facility_id, 'OFFENDER', v_offender.id
+    );
+
+    RETURN jsonb_build_object(
+      'success', true,
+      'offenderId', v_offender.id,
+      'name', v_offender.name,
+      'facilityId', v_offender.facility_id
+    );
+  ELSE
+    -- Failed PIN: increment attempt counter
+    IF v_offender.failed_pin_attempts + 1 >= v_max_attempts THEN
+      UPDATE public.offenders
+      SET failed_pin_attempts = v_offender.failed_pin_attempts + 1,
+          pin_locked_until = now() + v_lockout_interval,
+          updated_at = now()
+      WHERE id = v_offender.id;
+
+      INSERT INTO public.audit_logs (
+        action, actor_id, actor_role, facility_id, resource_type, resource_id, metadata
+      ) VALUES (
+        'INMATE_ACCOUNT_LOCKED', v_offender.id, 'INMATE', v_offender.facility_id, 'OFFENDER', v_offender.id,
+        jsonb_build_object('attempts', v_offender.failed_pin_attempts + 1, 'locked_until', now() + v_lockout_interval)
+      );
+
+      RETURN jsonb_build_object(
+        'success', false,
+        'error', 'Account locked after 3 failed PIN attempts. Contact unit staff.',
+        'lockedUntil', now() + v_lockout_interval
+      );
+    ELSE
+      UPDATE public.offenders
+      SET failed_pin_attempts = v_offender.failed_pin_attempts + 1,
+          updated_at = now()
+      WHERE id = v_offender.id;
+
+      INSERT INTO public.audit_logs (
+        action, actor_id, actor_role, facility_id, resource_type, resource_id, metadata
+      ) VALUES (
+        'INMATE_LOGIN_FAILED', v_offender.id, 'INMATE', v_offender.facility_id, 'OFFENDER', v_offender.id,
+        jsonb_build_object('attempts', v_offender.failed_pin_attempts + 1, 'remaining', v_max_attempts - (v_offender.failed_pin_attempts + 1))
+      );
+
+      RETURN jsonb_build_object(
+        'success', false,
+        'error', 'Invalid Offender ID or PIN.',
+        'attemptsRemaining', v_max_attempts - (v_offender.failed_pin_attempts + 1)
+      );
+    END IF;
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+-- 9.2 SAFE OFFENDER LOOKUP FOR FAMILY PORTAL
+-- Allows family members to verify an inmate by ID or Name without exposing PIN hashes or balances
 CREATE OR REPLACE FUNCTION public.search_offender_for_family(
   search_term TEXT,
   target_facility_id UUID DEFAULT NULL
@@ -749,8 +951,13 @@ RETURNS TABLE (
   facility_name TEXT
 ) AS $$
 BEGIN
+  -- Strict caller verification
   IF public.current_user_role() NOT IN ('FAMILY', 'ADMIN') THEN
     RAISE EXCEPTION 'Access Denied: Inmate search is restricted to authorized family accounts.';
+  END IF;
+
+  IF search_term IS NULL OR LENGTH(TRIM(search_term)) < 2 THEN
+    RAISE EXCEPTION 'Search term must be at least 2 characters.';
   END IF;
 
   RETURN QUERY
@@ -773,8 +980,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
--- 7.2 ATOMIC INMATE ORDER SUBMISSION
--- Validates stock, checks balance & weekly limit, deducts balance, and writes ledger in 1 transaction
+-- 9.3 ATOMIC INMATE ORDER SUBMISSION WITH PRODUCT & FACILITY ISOLATION
+-- Deadlock-safe product sorting, balance checks, stock deduction, and double-entry ledger in 1 transaction
 CREATE OR REPLACE FUNCTION public.place_inmate_order(
   p_items JSONB
 )
@@ -787,17 +994,19 @@ DECLARE
   v_order_num TEXT;
   v_barcode TEXT;
   v_subtotal NUMERIC(10, 2) := 0.00;
-  v_item JSONB;
+  v_item RECORD;
   v_product RECORD;
   v_item_total NUMERIC(10, 2);
-  v_item_qty INTEGER;
-  v_prod_id UUID;
   v_delivery_date TIMESTAMPTZ;
 BEGIN
-  -- 1. Identify offender
+  -- 1. Identify caller
   v_offender_id := public.current_inmate_offender_id();
-  IF v_offender_id IS NULL THEN
-    RAISE EXCEPTION 'UNAUTHORIZED: Current session is not linked to a valid inmate.';
+  IF v_offender_id IS NULL OR public.current_user_role() != 'INMATE' THEN
+    RAISE EXCEPTION 'UNAUTHORIZED: Only authenticated inmates may place commissary orders.';
+  END IF;
+
+  IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
+    RAISE EXCEPTION 'Order cart cannot be empty.';
   END IF;
 
   -- 2. Lock and fetch offender row
@@ -814,47 +1023,55 @@ BEGIN
   FROM public.facilities
   WHERE id = v_offender.facility_id;
 
-  -- 3. Calculate order total and verify inventory stock
-  FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
+  -- 3. Deadlock-Safe Concurrency: Process and lock product rows in sorted UUID order
+  FOR v_item IN
+    SELECT
+      (elem->>'productId')::UUID AS product_id,
+      (elem->>'quantity')::INTEGER AS quantity
+    FROM jsonb_array_elements(p_items) AS elem
+    ORDER BY (elem->>'productId')::UUID ASC
   LOOP
-    v_prod_id := (v_item->>'productId')::UUID;
-    v_item_qty := (v_item->>'quantity')::INTEGER;
-
-    IF v_item_qty <= 0 THEN
-      RAISE EXCEPTION 'Invalid quantity for product.';
+    IF v_item.quantity <= 0 THEN
+      RAISE EXCEPTION 'Invalid item quantity: must be positive integer.';
     END IF;
 
     SELECT * INTO v_product
     FROM public.products
-    WHERE id = v_prod_id AND active = true
+    WHERE id = v_item.product_id AND active = true
     FOR UPDATE;
 
     IF NOT FOUND THEN
-      RAISE EXCEPTION 'Product % is unavailable or discontinued.', v_prod_id;
+      RAISE EXCEPTION 'Product % is unavailable or inactive.', v_item.product_id;
     END IF;
 
-    IF v_product.stock < v_item_qty THEN
+    -- 4. Mandatory Facility Isolation Check:
+    -- Products must belong to the offender's facility or be globally shared (facility_id IS NULL)
+    IF v_product.facility_id IS NOT NULL AND v_product.facility_id != v_offender.facility_id THEN
+      RAISE EXCEPTION 'SECURITY VIOLATION: Product "%" does not belong to your assigned facility.', v_product.name;
+    END IF;
+
+    IF v_product.stock < v_item.quantity THEN
       RAISE EXCEPTION 'Insufficient stock for "%". Requested: %, Available: %',
-        v_product.name, v_item_qty, v_product.stock;
+        v_product.name, v_item.quantity, v_product.stock;
     END IF;
 
-    v_item_total := ROUND(v_product.price * v_item_qty, 2);
+    v_item_total := ROUND(v_product.price * v_item.quantity, 2);
     v_subtotal := v_subtotal + v_item_total;
   END LOOP;
 
-  -- 4. Check available balance rule
+  -- 5. Rule: Check Available Balance
   IF v_subtotal > v_offender.balance THEN
     RAISE EXCEPTION 'Insufficient funds: Order total ($%) exceeds your current balance ($%).',
       v_subtotal, v_offender.balance;
   END IF;
 
-  -- 5. Check remaining weekly spending limit rule
+  -- 6. Rule: Check Remaining Weekly Spending Limit
   IF (v_offender.current_weekly_spent + v_subtotal) > v_offender.weekly_limit THEN
     RAISE EXCEPTION 'Weekly spending limit exceeded: Order total ($%) exceeds remaining weekly allowance ($%).',
       v_subtotal, (v_offender.weekly_limit - v_offender.current_weekly_spent);
   END IF;
 
-  -- 6. Generate order identifiers
+  -- 7. Generate identifiers
   v_order_num := '#CC-' || LPAD(FLOOR(RANDOM() * 90000 + 10000)::TEXT, 5, '0');
   v_barcode := 'BC-' || v_order_num || '-' || TO_CHAR(now(), 'YYYYMMDD');
   v_delivery_date := now() + INTERVAL '3 days';
@@ -862,26 +1079,27 @@ BEGIN
   -- Set session auth flag for controlled balance update trigger
   PERFORM set_config('canteen.authorized_transaction', 'true', true);
 
-  -- 7. Deduct inventory stock
-  FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
+  -- 8. Deduct stock
+  FOR v_item IN
+    SELECT
+      (elem->>'productId')::UUID AS product_id,
+      (elem->>'quantity')::INTEGER AS quantity
+    FROM jsonb_array_elements(p_items) AS elem
   LOOP
-    v_prod_id := (v_item->>'productId')::UUID;
-    v_item_qty := (v_item->>'quantity')::INTEGER;
-
     UPDATE public.products
-    SET stock = stock - v_item_qty,
+    SET stock = stock - v_item.quantity,
         updated_at = now()
-    WHERE id = v_prod_id;
+    WHERE id = v_item.product_id;
   END LOOP;
 
-  -- 8. Deduct inmate balance and increase weekly spend
+  -- 9. Deduct inmate balance and increment weekly spending
   UPDATE public.offenders
   SET balance = balance - v_subtotal,
       current_weekly_spent = current_weekly_spent + v_subtotal,
       updated_at = now()
   WHERE id = v_offender_id;
 
-  -- 9. Create Order
+  -- 10. Create Order
   INSERT INTO public.orders (
     order_number,
     facility_id,
@@ -904,15 +1122,16 @@ BEGIN
     v_barcode
   ) RETURNING id INTO v_order_id;
 
-  -- 10. Create Order Items
-  FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
+  -- 11. Create Order Items
+  FOR v_item IN
+    SELECT
+      (elem->>'productId')::UUID AS product_id,
+      (elem->>'quantity')::INTEGER AS quantity
+    FROM jsonb_array_elements(p_items) AS elem
   LOOP
-    v_prod_id := (v_item->>'productId')::UUID;
-    v_item_qty := (v_item->>'quantity')::INTEGER;
-
     SELECT price INTO v_item_total
     FROM public.products
-    WHERE id = v_prod_id;
+    WHERE id = v_item.product_id;
 
     INSERT INTO public.order_items (
       order_id,
@@ -922,14 +1141,29 @@ BEGIN
       total_price
     ) VALUES (
       v_order_id,
-      v_prod_id,
-      v_item_qty,
+      v_item.product_id,
+      v_item.quantity,
       v_item_total,
-      ROUND(v_item_total * v_item_qty, 2)
+      ROUND(v_item_total * v_item.quantity, 2)
     );
   END LOOP;
 
-  -- 11. Write immutable double-entry ledger entry
+  -- 12. Create Order Status History
+  INSERT INTO public.order_status_history (
+    order_id,
+    previous_status,
+    new_status,
+    changed_by,
+    notes
+  ) VALUES (
+    v_order_id,
+    NULL,
+    'PROCESSING',
+    v_offender_id,
+    'Order submitted via inmate commissary kiosk.'
+  );
+
+  -- 13. Write immutable double-entry ledger entry
   INSERT INTO public.ledger_entries (
     facility_id,
     offender_id,
@@ -954,11 +1188,11 @@ BEGIN
     'Commissary order ' || v_order_num
   );
 
-  -- 12. Create Order Picking List
+  -- 14. Create Order Picking List
   INSERT INTO public.picking_lists (order_id, status)
   VALUES (v_order_id, 'PENDING');
 
-  -- 13. Create Inmate Notification
+  -- 15. Create Inmate Notification
   INSERT INTO public.notifications (
     offender_id,
     type,
@@ -971,7 +1205,7 @@ BEGIN
     'Your commissary order of $' || v_subtotal || ' has been queued for warehouse fulfillment.'
   );
 
-  -- 14. Audit Log
+  -- 16. Audit Log
   INSERT INTO public.audit_logs (
     action,
     actor_id,
@@ -1000,62 +1234,126 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
--- 7.3 ATOMIC TOUCHPAY DEPOSIT CONFIRMATION
--- Credits balance strictly on confirmed TouchPay webhook or verified gateway response
+-- 9.4 TRUSTED SERVER-SIDE TOUCHPAY DEPOSIT CONFIRMATION
+-- Strictly restricted to service_role / trusted server backend.
+-- Validates provider reference, amount, currency, idempotency, and pending status.
 CREATE OR REPLACE FUNCTION public.process_confirmed_touchpay_deposit(
   p_provider_ref TEXT,
-  p_idempotency_key TEXT
+  p_idempotency_key TEXT,
+  p_verified_amount NUMERIC(10, 2),
+  p_currency TEXT DEFAULT 'USD'
 )
 RETURNS JSONB AS $$
 DECLARE
   v_deposit RECORD;
   v_offender RECORD;
 BEGIN
-  -- 1. Fetch deposit record
+  -- 1. MANDATORY SECURITY CALLER GATE:
+  -- Only the backend service_role or database superuser may execute this function.
+  -- Direct PostgREST invocation by anon or authenticated roles is blocked.
+  IF auth.role() IS DISTINCT FROM 'service_role' AND current_user IS DISTINCT FROM 'postgres' THEN
+    RAISE EXCEPTION 'SECURITY VIOLATION: process_confirmed_touchpay_deposit is restricted to trusted backend service_role.';
+  END IF;
+
+  -- 2. Validate input parameters
+  IF p_provider_ref IS NULL OR TRIM(p_provider_ref) = '' THEN
+    RAISE EXCEPTION 'Provider reference is required.';
+  END IF;
+
+  IF p_idempotency_key IS NULL OR TRIM(p_idempotency_key) = '' THEN
+    RAISE EXCEPTION 'Idempotency key is required.';
+  END IF;
+
+  IF p_verified_amount IS NULL OR p_verified_amount <= 0.00 THEN
+    RAISE EXCEPTION 'Verified deposit amount must be positive.';
+  END IF;
+
+  IF p_currency IS DISTINCT FROM 'USD' THEN
+    RAISE EXCEPTION 'Unsupported currency (%). Only USD is accepted.', p_currency;
+  END IF;
+
+  -- 3. Lock deposit row for concurrency safety
   SELECT * INTO v_deposit
   FROM public.deposits
   WHERE provider_ref = p_provider_ref
   FOR UPDATE;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'Deposit with provider reference % not found.', p_provider_ref;
+    RAISE EXCEPTION 'Deposit with provider reference "%" not found.', p_provider_ref;
   END IF;
 
-  -- 2. Idempotency Check: if already succeeded, exit safely without double-crediting
+  -- 4. Idempotency Key Validation: Must match recorded idempotency key
+  IF v_deposit.idempotency_key IS DISTINCT FROM p_idempotency_key THEN
+    RAISE EXCEPTION 'Idempotency key mismatch for provider reference "%".', p_provider_ref;
+  END IF;
+
+  -- 5. Idempotent Success Handler:
+  -- If deposit was already confirmed, safely exit without double-crediting
   IF v_deposit.status = 'SUCCEEDED' THEN
     RETURN jsonb_build_object(
       'processed', false,
       'alreadyProcessed', true,
-      'message', 'Deposit already confirmed and credited previously.'
+      'status', 'SUCCEEDED',
+      'message', 'Deposit was already confirmed and credited previously.'
     );
   END IF;
 
-  -- 3. Lock offender row
+  -- 6. Legitimate Pending Check:
+  -- Deposits can ONLY be confirmed if currently in PENDING status
+  IF v_deposit.status != 'PENDING' THEN
+    RAISE EXCEPTION 'Deposit "%" cannot be processed because current status is "%".',
+      p_provider_ref, v_deposit.status;
+  END IF;
+
+  -- 7. Amount Verification:
+  -- Verified gateway amount must exactly match the recorded deposit intent amount
+  IF v_deposit.amount != p_verified_amount THEN
+    -- Flag potential fraud: mark deposit failed and record audit alert
+    UPDATE public.deposits
+    SET status = 'FAILED',
+        updated_at = now()
+    WHERE id = v_deposit.id;
+
+    INSERT INTO public.audit_logs (
+      action, actor_id, actor_role, facility_id, resource_type, resource_id, metadata
+    ) VALUES (
+      'TOUCHPAY_AMOUNT_MISMATCH_FRAUD', 'TOUCHPAY_GATEWAY', 'SYSTEM', v_deposit.facility_id, 'DEPOSIT', p_provider_ref,
+      jsonb_build_object(
+        'recorded_amount', v_deposit.amount,
+        'verified_amount', p_verified_amount
+      )
+    );
+
+    RAISE EXCEPTION 'Deposit amount mismatch: recorded $%, gateway verified $%. Deposit marked FAILED.',
+      v_deposit.amount, p_verified_amount;
+  END IF;
+
+  -- 8. Lock offender row
   SELECT * INTO v_offender
   FROM public.offenders
   WHERE id = v_deposit.offender_id
   FOR UPDATE;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'Associated offender not found.';
+    RAISE EXCEPTION 'Associated offender "%" not found.', v_deposit.offender_id;
   END IF;
 
   -- Set session auth flag for controlled balance update trigger
   PERFORM set_config('canteen.authorized_transaction', 'true', true);
 
-  -- 4. Credit balance
+  -- 9. Credit offender balance
   UPDATE public.offenders
   SET balance = balance + v_deposit.amount,
       updated_at = now()
   WHERE id = v_deposit.offender_id;
 
-  -- 5. Mark deposit as succeeded
+  -- 10. Mark deposit as SUCCEEDED
   UPDATE public.deposits
   SET status = 'SUCCEEDED',
       completed_at = now()
   WHERE id = v_deposit.id;
 
-  -- 6. Write immutable double-entry ledger entry
+  -- 11. Write immutable double-entry ledger entry
   INSERT INTO public.ledger_entries (
     facility_id,
     offender_id,
@@ -1080,7 +1378,7 @@ BEGIN
     'TouchPay trust fund deposit ' || v_deposit.provider_ref
   );
 
-  -- 7. Send notification to inmate
+  -- 12. Send notification to inmate
   INSERT INTO public.notifications (
     offender_id,
     type,
@@ -1093,7 +1391,7 @@ BEGIN
     'A deposit of $' || v_deposit.amount || ' has been credited to your trust balance via TouchPay.'
   );
 
-  -- 8. Audit Log
+  -- 13. Audit Log
   INSERT INTO public.audit_logs (
     action,
     actor_id,
@@ -1103,20 +1401,73 @@ BEGIN
     resource_id,
     metadata
   ) VALUES (
-    'DEPOSIT_CONFIRMED',
+    'TOUCHPAY_DEPOSIT_CONFIRMED',
     'TOUCHPAY_GATEWAY',
     'SYSTEM',
     v_deposit.facility_id,
     'DEPOSIT',
     v_deposit.provider_ref,
-    jsonb_build_object('amount', v_deposit.amount, 'new_balance', v_offender.balance + v_deposit.amount)
+    jsonb_build_object(
+      'amount', v_deposit.amount,
+      'currency', p_currency,
+      'idempotency_key', p_idempotency_key,
+      'new_balance', v_offender.balance + v_deposit.amount
+    )
   );
 
   RETURN jsonb_build_object(
     'processed', true,
     'alreadyProcessed', false,
+    'status', 'SUCCEEDED',
     'newBalance', v_offender.balance + v_deposit.amount,
     'message', 'Trust funds successfully credited to inmate account.'
   );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+-- ==============================================================================
+-- 10. EXPLICIT PERMISSION GRANTS AND REVOCATIONS (LEAST PRIVILEGE)
+-- ==============================================================================
+
+-- 10.1 REVOKE ALL DEFAULT PERMISSIONS ON PUBLIC SCHEMA FUNCTIONS
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM anon;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM authenticated;
+
+-- 10.2 GRANT MINIMUM EXECUTION RIGHTS ON SPECIFIC FUNCTIONS
+-- Helper functions needed by RLS policies
+GRANT EXECUTE ON FUNCTION public.current_profile() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.current_user_role() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.current_user_facility() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.current_inmate_offender_id() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.current_family_account_id() TO authenticated;
+
+-- Client-facing operational functions
+GRANT EXECUTE ON FUNCTION public.verify_inmate_pin(TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.search_offender_for_family(TEXT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.place_inmate_order(JSONB) TO authenticated;
+
+-- PRIVILEGED FUNCTION: Process TouchPay deposit MUST ONLY be executable by service_role
+GRANT EXECUTE ON FUNCTION public.process_confirmed_touchpay_deposit(TEXT, TEXT, NUMERIC, TEXT) TO service_role;
+REVOKE EXECUTE ON FUNCTION public.process_confirmed_touchpay_deposit(TEXT, TEXT, NUMERIC, TEXT) FROM anon;
+REVOKE EXECUTE ON FUNCTION public.process_confirmed_touchpay_deposit(TEXT, TEXT, NUMERIC, TEXT) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.process_confirmed_touchpay_deposit(TEXT, TEXT, NUMERIC, TEXT) FROM PUBLIC;
+
+-- 10.3 TABLE-LEVEL PRIVILEGE RESTRICTIONS
+-- Revoke direct destructive operations from client roles
+REVOKE ALL ON TABLE public.audit_logs FROM anon, authenticated;
+GRANT SELECT ON TABLE public.audit_logs TO authenticated;
+
+REVOKE ALL ON TABLE public.ledger_entries FROM anon, authenticated;
+GRANT SELECT ON TABLE public.ledger_entries TO authenticated;
+
+REVOKE ALL ON TABLE public.order_status_history FROM anon, authenticated;
+GRANT SELECT ON TABLE public.order_status_history TO authenticated;
+
+-- 10.4 CRITICAL COLUMN-LEVEL REVOCATIONS
+-- NEVER allow clients to read PIN hashes or modify roles/balances directly
+REVOKE SELECT (pin_hash) ON public.offenders FROM anon, authenticated;
+REVOKE UPDATE (pin_hash) ON public.offenders FROM anon, authenticated;
+REVOKE UPDATE (balance, current_weekly_spent) ON public.offenders FROM anon, authenticated;
+REVOKE UPDATE (role, facility_id) ON public.user_profiles FROM anon, authenticated;
+REVOKE UPDATE (status, completed_at, amount, total_paid) ON public.deposits FROM anon, authenticated;
