@@ -48,6 +48,10 @@ export async function POST(req: NextRequest) {
       where: { userId: session.userId },
     });
 
+    if (!familyAccount) {
+      return NextResponse.json({ error: 'Family account record not found.' }, { status: 403 });
+    }
+
     const idempotencyKey = `idemp-${offender.id}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     const provider = getPaymentProvider();
 

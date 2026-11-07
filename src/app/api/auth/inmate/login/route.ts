@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
     if (!isPinValid) {
       const failedAttempts = offender.failedPinAttempts + 1;
       let lockUntil: Date | null = null;
-      if (failedAttempts >= 5) {
+      if (failedAttempts >= 3) {
         lockUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 min lockout
       }
 

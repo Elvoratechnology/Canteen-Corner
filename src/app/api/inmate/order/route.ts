@@ -42,8 +42,14 @@ export async function POST(req: NextRequest) {
         throw new Error('OFFENDER_NOT_FOUND');
       }
 
-      // 2. Fetch product records and verify stock
-      const productIds = items.map((i) => i.productId);
+      // 2. Aggregate quantities by productId to prevent duplicate item stock bypass
+      const aggregatedItemsMap = new Map<string, number>();
+      for (const item of items) {
+        const currentQty = aggregatedItemsMap.get(item.productId) || 0;
+        aggregatedItemsMap.set(item.productId, currentQty + item.quantity);
+      }
+
+      const productIds = Array.from(aggregatedItemsMap.keys());
       const products = await tx.product.findMany({
         where: { id: { in: productIds } },
       });
@@ -59,24 +65,29 @@ export async function POST(req: NextRequest) {
         name: string;
       }> = [];
 
-      for (const item of items) {
-        const prod = productMap.get(item.productId);
+      for (const [productId, quantity] of Array.from(aggregatedItemsMap.entries())) {
+        const prod = productMap.get(productId);
         if (!prod || !prod.active) {
           throw new Error(`Product not found or inactive.`);
         }
 
-        if (prod.stock < item.quantity) {
+        // Enforce facility ownership isolation
+        if ((prod as any).facilityId && (prod as any).facilityId !== offender.facilityId) {
+          throw new Error(`SECURITY VIOLATION: Product "${prod.name}" does not belong to your assigned facility.`);
+        }
+
+        if (prod.stock < quantity) {
           throw new Error(
-            `Insufficient stock for "${prod.name}". Only ${prod.stock} available (requested: ${item.quantity}).`
+            `Insufficient stock for "${prod.name}". Only ${prod.stock} available (requested: ${quantity}).`
           );
         }
 
-        const itemTotal = Math.round(prod.price * item.quantity * 100) / 100;
+        const itemTotal = Math.round(prod.price * quantity * 100) / 100;
         calculatedSubtotal += itemTotal;
 
         orderItemsToCreate.push({
           productId: prod.id,
-          quantity: item.quantity,
+          quantity,
           unitPrice: prod.price,
           totalPrice: itemTotal,
           name: prod.name,
@@ -113,11 +124,11 @@ export async function POST(req: NextRequest) {
       nextDelivery.setDate(nextDelivery.getDate() + daysUntilThursday);
       nextDelivery.setHours(14, 0, 0, 0);
 
-      // 6. Deduct stock from each product
-      for (const item of items) {
+      // 6. Deduct stock from each aggregated product
+      for (const [productId, quantity] of Array.from(aggregatedItemsMap.entries())) {
         await tx.product.update({
-          where: { id: item.productId },
-          data: { stock: { decrement: item.quantity } },
+          where: { id: productId },
+          data: { stock: { decrement: quantity } },
         });
       }
 

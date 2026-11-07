@@ -574,7 +574,7 @@ CREATE POLICY "facilities_select_authenticated" ON public.facilities
   FOR SELECT TO authenticated
   USING (
     id = public.current_user_facility()
-    OR public.current_user_role() = 'ADMIN'
+    OR (public.current_user_role() = 'ADMIN' AND public.current_user_facility() IS NULL)
     OR public.current_user_role() = 'FAMILY'
   );
 
@@ -1095,12 +1095,13 @@ BEGIN
   FROM public.facilities
   WHERE id = v_offender.facility_id;
 
-  -- Deadlock-safe product sorting and locking
+  -- Deadlock-safe product sorting, aggregation, and locking (prevents duplicate productId stock bypass)
   FOR v_item IN
     SELECT
       (elem->>'productId')::UUID AS product_id,
-      (elem->>'quantity')::INTEGER AS quantity
+      SUM((elem->>'quantity')::INTEGER)::INTEGER AS quantity
     FROM jsonb_array_elements(p_items) AS elem
+    GROUP BY (elem->>'productId')::UUID
     ORDER BY (elem->>'productId')::UUID ASC
   LOOP
     IF v_item.quantity <= 0 THEN
@@ -1140,8 +1141,12 @@ BEGIN
       v_subtotal, (v_offender.weekly_limit - v_offender.current_weekly_spent);
   END IF;
 
-  v_order_num := '#CC-' || LPAD(FLOOR(RANDOM() * 90000 + 10000)::TEXT, 5, '0');
-  v_barcode := 'BC-' || v_order_num || '-' || TO_CHAR(now(), 'YYYYMMDD');
+  -- Collision-safe Order Number and Barcode generation
+  LOOP
+    v_order_num := '#CC-' || LPAD(FLOOR(RANDOM() * 90000 + 10000)::TEXT, 5, '0');
+    v_barcode := 'BC-' || SUBSTRING(v_order_num FROM 2) || '-' || TO_CHAR(now(), 'YYYYMMDD') || '-' || LPAD(FLOOR(RANDOM() * 900 + 100)::TEXT, 3, '0');
+    EXIT WHEN NOT EXISTS (SELECT 1 FROM public.orders WHERE order_number = v_order_num OR barcode = v_barcode);
+  END LOOP;
   v_delivery_date := now() + INTERVAL '3 days';
 
   PERFORM set_config('canteen.authorized_transaction', 'true', true);
@@ -1149,8 +1154,10 @@ BEGIN
   FOR v_item IN
     SELECT
       (elem->>'productId')::UUID AS product_id,
-      (elem->>'quantity')::INTEGER AS quantity
+      SUM((elem->>'quantity')::INTEGER)::INTEGER AS quantity
     FROM jsonb_array_elements(p_items) AS elem
+    GROUP BY (elem->>'productId')::UUID
+    ORDER BY (elem->>'productId')::UUID ASC
   LOOP
     UPDATE public.products
     SET stock = stock - v_item.quantity,
@@ -1189,8 +1196,10 @@ BEGIN
   FOR v_item IN
     SELECT
       (elem->>'productId')::UUID AS product_id,
-      (elem->>'quantity')::INTEGER AS quantity
+      SUM((elem->>'quantity')::INTEGER)::INTEGER AS quantity
     FROM jsonb_array_elements(p_items) AS elem
+    GROUP BY (elem->>'productId')::UUID
+    ORDER BY (elem->>'productId')::UUID ASC
   LOOP
     SELECT price INTO v_item_total
     FROM public.products

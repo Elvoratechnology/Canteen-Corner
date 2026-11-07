@@ -64,7 +64,10 @@ export class TouchPayProvider implements IPaymentProvider {
       .update(rawBody)
       .digest('hex');
 
-    if (signature !== expectedSig && !signature.startsWith('test_')) {
+    const isTestAllowed = process.env.NODE_ENV !== 'production';
+    const isSignatureValid = signature === expectedSig || (isTestAllowed && signature.startsWith('test_'));
+
+    if (!isSignatureValid) {
       return { valid: false, error: 'Invalid HMAC webhook signature' };
     }
 
