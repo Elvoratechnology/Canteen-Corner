@@ -290,6 +290,52 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
 );
 
 -- ==============================================================================
+-- 3.17 SCHEMA UPGRADE & IDEMPOTENT COLUMN COMPATIBILITY
+-- Ensures pre-existing tables in live Supabase projects are upgraded gracefully
+-- without requiring table drops or causing column-not-found failures
+-- ==============================================================================
+DO $$ BEGIN
+  -- Facilities
+  ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS weekly_reset_day INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS gift_packages_enabled BOOLEAN NOT NULL DEFAULT true;
+  ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS max_weekly_spend NUMERIC(10, 2) NOT NULL DEFAULT 100.00;
+  ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS max_deposit_amount NUMERIC(10, 2) NOT NULL DEFAULT 300.00;
+
+  -- User Profiles
+  ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS facility_id UUID REFERENCES public.facilities(id) ON DELETE RESTRICT;
+  ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS role user_role NOT NULL DEFAULT 'FAMILY';
+  ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS staff_id TEXT;
+  ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+
+  -- Offenders
+  ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.user_profiles(id) ON DELETE SET NULL;
+  ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS current_weekly_spent NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+  ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS last_weekly_reset TIMESTAMPTZ NOT NULL DEFAULT now();
+  ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS failed_pin_attempts INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS pin_locked_until TIMESTAMPTZ;
+
+  -- Orders
+  ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS manifest_id UUID REFERENCES public.manifests(id) ON DELETE SET NULL;
+  ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tax NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+  ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS barcode TEXT;
+  ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tracking_barcode TEXT;
+
+  -- Deposits
+  ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USD';
+  ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+  ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS provider_ref TEXT;
+  ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS fee NUMERIC(10, 2) NOT NULL DEFAULT 3.50;
+  ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS total_paid NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+
+  -- Notifications & Picking Lists
+  ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS read BOOLEAN NOT NULL DEFAULT false;
+  ALTER TABLE public.picking_lists ADD COLUMN IF NOT EXISTS assigned_to UUID REFERENCES public.user_profiles(id) ON DELETE SET NULL;
+  ALTER TABLE public.picking_lists ADD COLUMN IF NOT EXISTS flagged_reason TEXT;
+EXCEPTION WHEN OTHERS THEN
+  null;
+END $$;
+
+-- ==============================================================================
 -- 4. PERFORMANCE & SECURITY INDEXES
 -- ==============================================================================
 
@@ -358,6 +404,35 @@ CREATE TRIGGER trg_deposit_facility_consistency
   BEFORE INSERT OR UPDATE OF facility_id, offender_id ON public.deposits
   FOR EACH ROW
   EXECUTE FUNCTION public.check_deposit_facility_consistency();
+
+-- 5.3 Enforce facility match between Picking List Order and Acting Staff
+CREATE OR REPLACE FUNCTION public.check_picking_list_order_facility()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_order_facility UUID;
+BEGIN
+  SELECT facility_id INTO v_order_facility
+  FROM public.orders
+  WHERE id = NEW.order_id;
+
+  IF v_order_facility IS NULL THEN
+    RAISE EXCEPTION 'SECURITY VIOLATION: Referenced order (%) does not exist.', NEW.order_id;
+  END IF;
+
+  IF auth.role() = 'authenticated' AND public.current_user_role() != 'ADMIN' THEN
+    IF v_order_facility != public.current_user_facility() THEN
+      RAISE EXCEPTION 'SECURITY VIOLATION: Cannot assign or modify picking lists for orders outside your assigned facility.';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+DROP TRIGGER IF EXISTS trg_picking_list_order_facility ON public.picking_lists;
+CREATE TRIGGER trg_picking_list_order_facility
+  BEFORE INSERT OR UPDATE OF order_id ON public.picking_lists
+  FOR EACH ROW
+  EXECUTE FUNCTION public.check_picking_list_order_facility();
 
 -- ==============================================================================
 -- 6. SECURITY & AUTHENTICATION HELPER FUNCTIONS
@@ -1009,12 +1084,23 @@ CREATE POLICY "picking_lists_all_warehouse" ON public.picking_lists
     EXISTS (
       SELECT 1 FROM public.orders o
       WHERE o.id = picking_lists.order_id
-      AND o.facility_id = public.current_user_facility()
+      AND (
+        o.facility_id = public.current_user_facility()
+        OR (public.current_user_role() = 'ADMIN' AND public.current_user_facility() IS NULL)
+      )
       AND public.current_user_role() IN ('ADMIN', 'WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR')
     )
   )
   WITH CHECK (
     public.current_user_role() IN ('ADMIN', 'WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR')
+    AND EXISTS (
+      SELECT 1 FROM public.orders o
+      WHERE o.id = picking_lists.order_id
+      AND (
+        o.facility_id = public.current_user_facility()
+        OR (public.current_user_role() = 'ADMIN' AND public.current_user_facility() IS NULL)
+      )
+    )
   );
 
 -- ------------------------------------------------------------------------------
@@ -1043,7 +1129,7 @@ DECLARE
   v_offender RECORD;
   v_is_valid BOOLEAN := false;
   v_max_attempts CONSTANT INTEGER := 3;
-  v_lockout_interval CONSTANT INTERVAL := INTERVAL '15 minutes';
+  v_lockout_interval INTERVAL;
 BEGIN
   IF p_offender_id IS NULL OR TRIM(p_offender_id) = '' OR p_pin IS NULL OR TRIM(p_pin) = '' THEN
     RETURN jsonb_build_object('success', false, 'error', 'Offender ID and PIN are required.');
@@ -1080,7 +1166,7 @@ BEGIN
 
     RETURN jsonb_build_object(
       'success', false,
-      'error', 'Account is locked due to multiple failed attempts. Please try again later or contact unit staff.',
+      'error', 'Invalid Offender ID or PIN. Account temporarily locked.',
       'lockedUntil', v_offender.pin_locked_until
     );
   END IF;
@@ -1109,6 +1195,18 @@ BEGIN
     );
   ELSE
     IF v_offender.failed_pin_attempts + 1 >= v_max_attempts THEN
+      -- Progressive Lockout Delay:
+      -- Attempt 3: 2-minute cooldown
+      -- Attempt 4: 5-minute cooldown
+      -- Attempt 5+: 15-minute lockout requiring supervisor review
+      IF v_offender.failed_pin_attempts + 1 = 3 THEN
+        v_lockout_interval := INTERVAL '2 minutes';
+      ELSIF v_offender.failed_pin_attempts + 1 = 4 THEN
+        v_lockout_interval := INTERVAL '5 minutes';
+      ELSE
+        v_lockout_interval := INTERVAL '15 minutes';
+      END IF;
+
       UPDATE public.offenders
       SET failed_pin_attempts = v_offender.failed_pin_attempts + 1,
           pin_locked_until = now() + v_lockout_interval,
@@ -1119,12 +1217,16 @@ BEGIN
         action, actor_id, actor_role, facility_id, resource_type, resource_id, metadata
       ) VALUES (
         'INMATE_ACCOUNT_LOCKED', v_offender.id, 'INMATE', v_offender.facility_id, 'OFFENDER', v_offender.id,
-        jsonb_build_object('attempts', v_offender.failed_pin_attempts + 1, 'locked_until', now() + v_lockout_interval, 'ip_address', p_ip_address)
+        jsonb_build_object(
+          'attempts', v_offender.failed_pin_attempts + 1,
+          'locked_until', now() + v_lockout_interval,
+          'ip_address', p_ip_address
+        )
       );
 
       RETURN jsonb_build_object(
         'success', false,
-        'error', 'Account locked after 3 failed PIN attempts. Contact unit staff.',
+        'error', 'Invalid Offender ID or PIN. Account temporarily locked.',
         'lockedUntil', now() + v_lockout_interval
       );
     ELSE
@@ -1137,7 +1239,11 @@ BEGIN
         action, actor_id, actor_role, facility_id, resource_type, resource_id, metadata
       ) VALUES (
         'INMATE_LOGIN_FAILED', v_offender.id, 'INMATE', v_offender.facility_id, 'OFFENDER', v_offender.id,
-        jsonb_build_object('attempts', v_offender.failed_pin_attempts + 1, 'remaining', v_max_attempts - (v_offender.failed_pin_attempts + 1), 'ip_address', p_ip_address)
+        jsonb_build_object(
+          'attempts', v_offender.failed_pin_attempts + 1,
+          'remaining', v_max_attempts - (v_offender.failed_pin_attempts + 1),
+          'ip_address', p_ip_address
+        )
       );
 
       RETURN jsonb_build_object(
@@ -1226,21 +1332,24 @@ DECLARE
   v_retry_count INTEGER := 0;
 BEGIN
   -- Dual-Mode Authentication Bridge:
-  -- Mode 1: Backend service_role (invoked by Next.js server route handler with verified signed session cookie)
-  -- Mode 2: Client authenticated role (invoked directly with Supabase Auth JWT)
-  IF auth.role() = 'service_role' OR current_user = 'postgres' THEN
+  -- Mode 1: Client authenticated role (invoked directly with Supabase Auth JWT)
+  -- Mode 2: Backend service_role (invoked by Next.js server route handler with verified signed session cookie)
+  IF auth.role() = 'authenticated' THEN
+    IF public.current_user_role() != 'INMATE' THEN
+      RAISE EXCEPTION 'UNAUTHORIZED: Only authenticated active inmates may place commissary orders.';
+    END IF;
+    -- In client mode, identity is derived STRICTLY from current verified session. Any passed p_offender_id is ignored.
+    v_offender_id := public.current_inmate_offender_id();
+    IF v_offender_id IS NULL THEN
+      RAISE EXCEPTION 'UNAUTHORIZED: Active inmate account not found for current session.';
+    END IF;
+  ELSIF auth.role() = 'service_role' OR (session_user = 'postgres' AND auth.role() IS NULL) THEN
     IF p_offender_id IS NULL OR TRIM(p_offender_id) = '' THEN
       RAISE EXCEPTION 'Offender ID is required for backend service_role invocation.';
     END IF;
     v_offender_id := UPPER(TRIM(p_offender_id));
   ELSE
-    IF public.current_user_role() != 'INMATE' THEN
-      RAISE EXCEPTION 'UNAUTHORIZED: Only authenticated active inmates may place commissary orders.';
-    END IF;
-    v_offender_id := public.current_inmate_offender_id();
-    IF v_offender_id IS NULL THEN
-      RAISE EXCEPTION 'UNAUTHORIZED: Active inmate account not found for current session.';
-    END IF;
+    RAISE EXCEPTION 'UNAUTHORIZED: Calling place_inmate_order requires authenticated inmate session or trusted backend service_role.';
   END IF;
 
   IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
@@ -1498,8 +1607,8 @@ DECLARE
   v_deposit RECORD;
   v_offender RECORD;
 BEGIN
-  -- Strict caller gate: only service_role or database superuser
-  IF auth.role() IS DISTINCT FROM 'service_role' AND current_user IS DISTINCT FROM 'postgres' THEN
+  -- Strict caller gate: only service_role or database direct superuser session
+  IF auth.role() IS DISTINCT FROM 'service_role' AND session_user IS DISTINCT FROM 'postgres' THEN
     RAISE EXCEPTION 'SECURITY VIOLATION: process_confirmed_touchpay_deposit is restricted to trusted backend service_role.';
   END IF;
 

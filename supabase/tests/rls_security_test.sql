@@ -229,11 +229,18 @@ BEGIN
   -- Warehouse Picker Facility 1 must NEVER see orders from Facility 2
   SELECT COUNT(*) INTO v_fac2_orders FROM public.orders WHERE facility_id = '22222222-2222-2222-2222-222222222222';
 
-  IF v_fac2_orders = 0 THEN
-    INSERT INTO test_results VALUES (6, 'Warehouse Picker Facility 1 cannot see Facility 2 orders', true, 'Cross-facility order segregation verified');
-  ELSE
-    INSERT INTO test_results VALUES (6, 'Warehouse Picker Facility 1 leaked Facility 2 orders', false, format('Visible Fac2 orders: %s', v_fac2_orders));
-  END IF;
+  -- Verify WITH CHECK: Warehouse Picker Facility 1 cannot insert picking list for Facility 2 order
+  BEGIN
+    INSERT INTO public.picking_lists (order_id, status)
+    VALUES ('99999999-9999-9999-9999-999999999992', 'PENDING');
+    INSERT INTO test_results VALUES (6, 'Warehouse Picker Facility 1 cross-facility picking list allowed (CRITICAL FAILURE)', false, 'Facility 2 picking list inserted');
+  EXCEPTION WHEN OTHERS THEN
+    IF v_fac2_orders = 0 THEN
+      INSERT INTO test_results VALUES (6, 'Warehouse Picker Facility 1 cannot see or create Facility 2 picking lists', true, 'Cross-facility order segregation and WITH CHECK verified');
+    ELSE
+      INSERT INTO test_results VALUES (6, 'Warehouse Picker Facility 1 leaked Facility 2 orders', false, format('Visible Fac2 orders: %s', v_fac2_orders));
+    END IF;
+  END;
 END $$;
 
 -- ==============================================================================
@@ -398,6 +405,33 @@ BEGIN
   ELSE
     INSERT INTO test_results VALUES (12, 'Order sequence collision detected', false, format('seq1: %s, seq2: %s', v_seq1, v_seq2));
   END IF;
+END $$;
+
+-- ==============================================================================
+-- TEST 13: Inmate Order Placement Offender Identity Enforcement (Anti-Spoofing)
+-- ==============================================================================
+DO $$
+DECLARE
+  v_order_res JSONB;
+BEGIN
+  SET LOCAL ROLE authenticated;
+  PERFORM set_config('request.jwt.claims', '{"sub": "aaaa1111-aaaa-1111-aaaa-111111111111", "role": "authenticated"}', true);
+
+  -- Inmate A attempts to supply p_offender_id = 'B7654321' (Inmate B)
+  -- The function must ignore 'B7654321' and strictly order for Inmate A (A1234567)
+  v_order_res := public.place_inmate_order(
+    jsonb_build_array(jsonb_build_object('productId', '88888888-8888-8888-8888-888888888881', 'quantity', 1)),
+    'B7654321'
+  );
+
+  -- Verify the resulting order was placed for Inmate A, NOT Inmate B
+  IF EXISTS (SELECT 1 FROM public.orders WHERE id = (v_order_res->>'orderId')::UUID AND offender_id = 'A1234567') THEN
+    INSERT INTO test_results VALUES (13, 'Authenticated inmate cannot spoof offender_id; identity derived strictly from session', true, 'Supplied offender_id B7654321 was ignored; order created for A1234567');
+  ELSE
+    INSERT INTO test_results VALUES (13, 'Inmate offender spoofing succeeded (CRITICAL FAILURE)', false, 'Order was placed for forged offender ID');
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  INSERT INTO test_results VALUES (13, 'Inmate order placement anti-spoof check error', false, SQLERRM);
 END $$;
 
 -- OUTPUT SUMMARY TABLE

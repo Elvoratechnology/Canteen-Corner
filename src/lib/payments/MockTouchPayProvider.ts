@@ -68,6 +68,18 @@ export class MockTouchPayProvider implements IPaymentProvider {
         return { valid: false, error: 'Missing TouchPay webhook signature header' };
       }
 
+      // Cryptographic Replay Protection: verify webhook timestamp window
+      const timestampStr = headers['x-touchpay-timestamp'] || headers['X-TouchPay-Timestamp'];
+      if (timestampStr) {
+        const timestamp = parseInt(timestampStr, 10);
+        if (!isNaN(timestamp)) {
+          const timeDiff = Math.abs(Date.now() - timestamp);
+          if (timeDiff > 5 * 60 * 1000) { // 5-minute maximum tolerance window
+            return { valid: false, error: 'Webhook timestamp outside allowed replay protection window (5 minutes).' };
+          }
+        }
+      }
+
       const expectedSig = crypto
         .createHmac('sha256', this.webhookSecret)
         .update(rawBody)
