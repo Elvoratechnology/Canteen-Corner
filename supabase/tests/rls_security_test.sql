@@ -7,9 +7,9 @@
 -- TARGET ENVIRONMENT:
 -- - Run in a LOCAL SUPABASE TEST ENVIRONMENT or a DEDICATED ISOLATED STAGING PROJECT.
 -- - DO NOT run against a production database:
---   1. Sequence calls (nextval) are non-transactional and will NOT be rolled back.
---   2. Pre-execution cleanup deletes test fixture IDs. If run on a real database,
---      it will delete matching test records.
+--   1. Sequence calls (nextval) inside place_inmate_order (Test 12) are non-transactional
+--      in PostgreSQL and will NOT be rolled back.
+--   2. Strict safety guards will halt execution if test IDs collide with non-fixture data.
 --
 -- LIMITATION OF SQL TESTING:
 -- - SQL testing verifies PostgreSQL grants, RLS, triggers, and RPC caller gates.
@@ -54,14 +54,34 @@ DECLARE
   v_prod2_id UUID := '88888888-8888-8888-8888-888888888882';
   v_order1_id UUID := '99999999-9999-9999-9999-999999999991';
   v_order2_id UUID := '99999999-9999-9999-9999-999999999992';
+  v_pick1_id UUID := 'bbbb1111-bbbb-1111-bbbb-111111111111';
+  v_pick2_id UUID := 'bbbb2222-bbbb-2222-bbbb-222222222222';
   v_dep1_id UUID := 'aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa';
   v_notif_id UUID := 'aaaaaaaa-2222-2222-2222-aaaaaaaaaaaa';
+  v_audit_id UUID := 'aaaaaaaa-3333-3333-3333-aaaaaaaaaaaa';
 BEGIN
   RESET ROLE;
   PERFORM set_config('canteen.authorized_transaction', 'true', true);
 
-  -- Safety Verification 1: Ensure test emails do not collide with existing real users under different IDs
+  -- Safety Verification 1: Verify auth.users fixture identities in both directions before any pre-cleanup
   IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'auth' AND tablename = 'users') THEN
+    -- Check 1A: If an auth.user exists with our test UUIDs, verify its email matches the exact expected fixture email
+    IF EXISTS (
+      SELECT 1 FROM auth.users
+      WHERE id IN (v_inmate_a_uid, v_inmate_b_uid, v_family_1_uid, v_family_2_uid, v_staff_fac1_uid, v_staff_fac2_uid)
+      AND email IS DISTINCT FROM CASE
+        WHEN id = v_inmate_a_uid THEN 'test_inmate_a_rls@canteen.test'
+        WHEN id = v_inmate_b_uid THEN 'test_inmate_b_rls@canteen.test'
+        WHEN id = v_family_1_uid THEN 'test_family_1_rls@canteen.test'
+        WHEN id = v_family_2_uid THEN 'test_family_2_rls@canteen.test'
+        WHEN id = v_staff_fac1_uid THEN 'test_staff_fac1_rls@canteen.test'
+        WHEN id = v_staff_fac2_uid THEN 'test_staff_fac2_rls@canteen.test'
+      END
+    ) THEN
+      RAISE EXCEPTION 'SAFETY HALT: Existing auth.users record matches test UUIDs but does not match expected test fixture email. Refusing to delete or overwrite real user.';
+    END IF;
+
+    -- Check 1B: If an auth.user exists with our test emails, verify its id matches the exact corresponding test UUID
     IF EXISTS (
       SELECT 1 FROM auth.users
       WHERE email IN (
@@ -69,37 +89,220 @@ BEGIN
         'test_family_1_rls@canteen.test', 'test_family_2_rls@canteen.test',
         'test_staff_fac1_rls@canteen.test', 'test_staff_fac2_rls@canteen.test'
       )
-      AND id NOT IN (
-        v_inmate_a_uid, v_inmate_b_uid, v_family_1_uid,
-        v_family_2_uid, v_staff_fac1_uid, v_staff_fac2_uid
-      )
+      AND id IS DISTINCT FROM CASE
+        WHEN email = 'test_inmate_a_rls@canteen.test' THEN v_inmate_a_uid
+        WHEN email = 'test_inmate_b_rls@canteen.test' THEN v_inmate_b_uid
+        WHEN email = 'test_family_1_rls@canteen.test' THEN v_family_1_uid
+        WHEN email = 'test_family_2_rls@canteen.test' THEN v_family_2_uid
+        WHEN email = 'test_staff_fac1_rls@canteen.test' THEN v_staff_fac1_uid
+        WHEN email = 'test_staff_fac2_rls@canteen.test' THEN v_staff_fac2_uid
+      END
     ) THEN
       RAISE EXCEPTION 'SAFETY HALT: Unique email collision detected in auth.users with different user IDs. Test suite must run in an isolated test database.';
     END IF;
   END IF;
 
-  -- Safety Verification 2: Ensure test offender IDs and facility IDs do not belong to real non-test records
-  IF EXISTS (SELECT 1 FROM public.offenders WHERE id IN ('A1234567', 'B7654321') AND name NOT LIKE '%(Test)%') THEN
-    RAISE EXCEPTION 'SAFETY HALT: Real inmate records match test offender IDs A1234567/B7654321. Refusing to run in non-test database.';
-  END IF;
-  IF EXISTS (SELECT 1 FROM public.facilities WHERE id IN (v_fac1_id, v_fac2_id) AND name NOT LIKE '%(Test)%') THEN
-    RAISE EXCEPTION 'SAFETY HALT: Real facility records match test facility UUIDs. Refusing to run in non-test database.';
+  -- Safety Verification 2: Comprehensive NULL-safe collision check across ALL fixture IDs before any pre-cleanup
+  IF EXISTS (
+    SELECT 1 FROM public.offenders
+    WHERE id IN ('A1234567', 'B7654321')
+    AND (
+      user_id IS DISTINCT FROM CASE WHEN id = 'A1234567' THEN v_inmate_a_uid ELSE v_inmate_b_uid END
+      OR facility_id IS DISTINCT FROM CASE WHEN id = 'A1234567' THEN v_fac1_id ELSE v_fac2_id END
+      OR name IS DISTINCT FROM CASE WHEN id = 'A1234567' THEN 'Inmate A (Test)' ELSE 'Inmate B (Test)' END
+    )
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Existing offender records match test offender IDs (A1234567/B7654321) but are not disposable test fixtures.';
   END IF;
 
-  -- Scoped Pre-Cleanup: Strictly cleans up prior test artifacts from interrupted previous runs
-  DELETE FROM public.picking_lists WHERE order_id IN (v_order1_id, v_order2_id) OR order_id IN (SELECT id FROM public.orders WHERE offender_id IN ('A1234567', 'B7654321'));
-  DELETE FROM public.order_items WHERE order_id IN (v_order1_id, v_order2_id) OR order_id IN (SELECT id FROM public.orders WHERE offender_id IN ('A1234567', 'B7654321'));
-  DELETE FROM public.order_status_history WHERE order_id IN (v_order1_id, v_order2_id) OR order_id IN (SELECT id FROM public.orders WHERE offender_id IN ('A1234567', 'B7654321'));
-  DELETE FROM public.orders WHERE id IN (v_order1_id, v_order2_id) OR offender_id IN ('A1234567', 'B7654321') OR order_number IN ('#CC-TEST1', '#CC-TEST2');
-  DELETE FROM public.notifications WHERE id = v_notif_id OR offender_id IN ('A1234567', 'B7654321');
-  DELETE FROM public.deposits WHERE id = v_dep1_id OR provider_ref = 'TP-TEST-001' OR offender_id IN ('A1234567', 'B7654321');
-  DELETE FROM public.family_offender_links WHERE family_account_id IN (v_fam_acc1_id, v_fam_acc2_id) OR offender_id IN ('A1234567', 'B7654321');
-  DELETE FROM public.family_accounts WHERE id IN (v_fam_acc1_id, v_fam_acc2_id) OR user_id IN (v_family_1_uid, v_family_2_uid);
-  DELETE FROM public.products WHERE id IN (v_prod1_id, v_prod2_id) OR sku IN ('SKU-FAC1-01', 'SKU-FAC2-01');
-  DELETE FROM public.offenders WHERE id IN ('A1234567', 'B7654321') OR user_id IN (v_inmate_a_uid, v_inmate_b_uid);
-  DELETE FROM public.user_profiles WHERE id IN (v_inmate_a_uid, v_inmate_b_uid, v_family_1_uid, v_family_2_uid, v_staff_fac1_uid, v_staff_fac2_uid);
+  IF EXISTS (
+    SELECT 1 FROM public.offenders
+    WHERE user_id IN (v_inmate_a_uid, v_inmate_b_uid)
+    AND id IS DISTINCT FROM CASE WHEN user_id = v_inmate_a_uid THEN 'A1234567' ELSE 'B7654321' END
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Inmate user ID is linked to a different offender record.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.facilities
+    WHERE id IN (v_fac1_id, v_fac2_id)
+    AND (
+      name IS DISTINCT FROM CASE WHEN id = v_fac1_id THEN 'Cumberland Regional Facility (Test)' ELSE 'Westside Correctional Center (Test)' END
+    )
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Real facility records match test facility UUIDs.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.user_profiles
+    WHERE id IN (v_inmate_a_uid, v_inmate_b_uid, v_family_1_uid, v_family_2_uid, v_staff_fac1_uid, v_staff_fac2_uid)
+    AND (
+      email IS DISTINCT FROM CASE
+        WHEN id = v_inmate_a_uid THEN 'test_inmate_a_rls@canteen.test'
+        WHEN id = v_inmate_b_uid THEN 'test_inmate_b_rls@canteen.test'
+        WHEN id = v_family_1_uid THEN 'test_family_1_rls@canteen.test'
+        WHEN id = v_family_2_uid THEN 'test_family_2_rls@canteen.test'
+        WHEN id = v_staff_fac1_uid THEN 'test_staff_fac1_rls@canteen.test'
+        WHEN id = v_staff_fac2_uid THEN 'test_staff_fac2_rls@canteen.test'
+      END
+      OR name IS DISTINCT FROM CASE
+        WHEN id = v_inmate_a_uid THEN 'Inmate A (Test)'
+        WHEN id = v_inmate_b_uid THEN 'Inmate B (Test)'
+        WHEN id = v_family_1_uid THEN 'Family User 1 (Test)'
+        WHEN id = v_family_2_uid THEN 'Family User 2 (Test)'
+        WHEN id = v_staff_fac1_uid THEN 'Staff Facility 1 (Test)'
+        WHEN id = v_staff_fac2_uid THEN 'Staff Facility 2 (Test)'
+      END
+    )
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Existing user profile matches test UUIDs but does not match exact expected test fixture identity.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.user_profiles
+    WHERE email IN (
+      'test_inmate_a_rls@canteen.test', 'test_inmate_b_rls@canteen.test',
+      'test_family_1_rls@canteen.test', 'test_family_2_rls@canteen.test',
+      'test_staff_fac1_rls@canteen.test', 'test_staff_fac2_rls@canteen.test'
+    )
+    AND id NOT IN (v_inmate_a_uid, v_inmate_b_uid, v_family_1_uid, v_family_2_uid, v_staff_fac1_uid, v_staff_fac2_uid)
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: User profile email collision detected with different user ID.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.products
+    WHERE id IN (v_prod1_id, v_prod2_id)
+    AND (
+      sku IS DISTINCT FROM CASE WHEN id = v_prod1_id THEN 'SKU-FAC1-01' ELSE 'SKU-FAC2-01' END
+      OR facility_id IS DISTINCT FROM CASE WHEN id = v_prod1_id THEN v_fac1_id ELSE v_fac2_id END
+    )
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Existing product matches test UUIDs but is not a disposable test fixture.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.orders
+    WHERE id IN (v_order1_id, v_order2_id)
+    AND (
+      order_number IS DISTINCT FROM CASE WHEN id = v_order1_id THEN '#CC-TEST1' ELSE '#CC-TEST2' END
+      OR barcode IS DISTINCT FROM CASE WHEN id = v_order1_id THEN 'BC-TEST1' ELSE 'BC-TEST2' END
+      OR facility_id IS DISTINCT FROM CASE WHEN id = v_order1_id THEN v_fac1_id ELSE v_fac2_id END
+    )
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Existing order matches test UUIDs but is not a disposable test fixture.';
+  END IF;
+
+  -- Strictly prevent deleting non-fixture orders that happen to reference the test offender IDs:
+  IF EXISTS (
+    SELECT 1 FROM public.orders
+    WHERE offender_id IN ('A1234567', 'B7654321')
+    AND id IS DISTINCT FROM v_order1_id
+    AND id IS DISTINCT FROM v_order2_id
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Foreign orders reference test offender IDs (A1234567/B7654321). Refusing to run on database with pre-existing inmate order history.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.picking_lists
+    WHERE id IN (v_pick1_id, v_pick2_id)
+    AND (
+      order_id IS DISTINCT FROM CASE WHEN id = v_pick1_id THEN v_order1_id ELSE v_order2_id END
+    )
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Existing picking list matches test UUIDs but is not a disposable test fixture.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.family_accounts
+    WHERE id IN (v_fam_acc1_id, v_fam_acc2_id)
+    AND (
+      user_id IS DISTINCT FROM CASE WHEN id = v_fam_acc1_id THEN v_family_1_uid ELSE v_family_2_uid END
+    )
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Existing family account matches test UUIDs but is not a disposable test fixture.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.family_accounts
+    WHERE user_id IN (v_family_1_uid, v_family_2_uid)
+    AND id IS DISTINCT FROM CASE WHEN user_id = v_family_1_uid THEN v_fam_acc1_id ELSE v_fam_acc2_id END
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Family user profile already owns a different family account.';
+  END IF;
+
+  -- Safety Verification: Validate relationship links matching test family account UUIDs against exact expected fixture mappings.
+  -- Established fixture mappings from test architecture:
+  --   * Family Account 1 (v_fam_acc1_id): Mapped strictly to Inmate A ('A1234567') [APPROVED Mother link in baseline setup].
+  --   * Family Account 2 (v_fam_acc2_id): Unlinked in baseline setup (transient Test 11 link to Inmate A 'A1234567' permitted if interrupted).
+  -- Any existing relationship row matching either test family account that maps to any other offender halts execution immediately.
+  IF EXISTS (
+    SELECT 1 FROM public.family_offender_links
+    WHERE family_account_id = v_fam_acc1_id
+    AND offender_id IS DISTINCT FROM 'A1234567'
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Family Account 1 (v_fam_acc1_id) has an unverified relationship link. Expected fixture mapping is strictly Inmate A (A1234567).';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.family_offender_links
+    WHERE family_account_id = v_fam_acc2_id
+    AND offender_id IS DISTINCT FROM 'A1234567'
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Family Account 2 (v_fam_acc2_id) has an unverified relationship link. Only disposable Test 11 link to Inmate A (A1234567) is permitted.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.deposits
+    WHERE id = v_dep1_id
+    AND (
+      provider_ref IS DISTINCT FROM 'TP-TEST-001'
+      OR offender_id IS DISTINCT FROM 'A1234567'
+    )
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Existing deposit matches test UUIDs but is not a disposable test fixture.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.notifications
+    WHERE id = v_notif_id
+    AND offender_id IS DISTINCT FROM 'A1234567'
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Existing notification matches test UUIDs but is not a disposable test fixture.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.audit_logs
+    WHERE id = v_audit_id
+    AND (
+      facility_id IS DISTINCT FROM v_fac1_id
+      OR user_id IS DISTINCT FROM v_inmate_a_uid
+    )
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Existing audit log matches test UUIDs but is not a disposable test fixture.';
+  END IF;
+
+  -- Scoped Pre-Cleanup: Strictly cleans up prior test artifacts from interrupted previous runs by explicit primary keys
+  DELETE FROM public.picking_lists WHERE id IN (v_pick1_id, v_pick2_id);
+  DELETE FROM public.order_items WHERE order_id IN (v_order1_id, v_order2_id);
+  DELETE FROM public.order_status_history WHERE order_id IN (v_order1_id, v_order2_id);
+  DELETE FROM public.orders WHERE id IN (v_order1_id, v_order2_id);
+  DELETE FROM public.notifications WHERE id = v_notif_id;
+  DELETE FROM public.audit_logs WHERE id = v_audit_id;
+  DELETE FROM public.deposits WHERE id = v_dep1_id;
+  DELETE FROM public.family_offender_links
+  WHERE (family_account_id = v_fam_acc1_id AND offender_id = 'A1234567')
+     OR (family_account_id = v_fam_acc2_id AND offender_id = 'A1234567');
+  DELETE FROM public.family_accounts WHERE id IN (v_fam_acc1_id, v_fam_acc2_id);
+  DELETE FROM public.products WHERE id IN (v_prod1_id, v_prod2_id);
+  DELETE FROM public.offenders WHERE id IN ('A1234567', 'B7654321') AND user_id IN (v_inmate_a_uid, v_inmate_b_uid);
+  DELETE FROM public.user_profiles
+  WHERE id IN (v_inmate_a_uid, v_inmate_b_uid, v_family_1_uid, v_family_2_uid, v_staff_fac1_uid, v_staff_fac2_uid)
+    AND email LIKE '%@canteen.test';
   IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'auth' AND tablename = 'users') THEN
-    DELETE FROM auth.users WHERE id IN (v_inmate_a_uid, v_inmate_b_uid, v_family_1_uid, v_family_2_uid, v_staff_fac1_uid, v_staff_fac2_uid);
+    DELETE FROM auth.users
+    WHERE id IN (v_inmate_a_uid, v_inmate_b_uid, v_family_1_uid, v_family_2_uid, v_staff_fac1_uid, v_staff_fac2_uid)
+      AND email LIKE '%@canteen.test';
   END IF;
   DELETE FROM public.facilities WHERE id IN (v_fac1_id, v_fac2_id);
 
@@ -156,39 +359,122 @@ BEGIN
   VALUES (v_order1_id, '#CC-TEST1', v_fac1_id, 'A1234567', 'PROCESSING', 15.00, 15.00, now() + INTERVAL '2 days', 'BC-TEST1'),
          (v_order2_id, '#CC-TEST2', v_fac2_id, 'B7654321', 'PROCESSING', 20.00, 20.00, now() + INTERVAL '2 days', 'BC-TEST2');
 
+  -- Insert Picking Lists
+  INSERT INTO public.picking_lists (id, order_id, status)
+  VALUES (v_pick1_id, v_order1_id, 'PENDING'),
+         (v_pick2_id, v_order2_id, 'PENDING');
+
   -- Insert Deposit
   INSERT INTO public.deposits (id, facility_id, offender_id, family_account_id, amount, total_paid, provider_ref, idempotency_key, status)
   VALUES (v_dep1_id, v_fac1_id, 'A1234567', v_fam_acc1_id, 25.00, 28.50, 'TP-TEST-001', 'idemp-test-001', 'SUCCEEDED');
+
+  -- Insert Audit Log
+  INSERT INTO public.audit_logs (id, user_id, action, entity, entity_id, facility_id, metadata)
+  VALUES (v_audit_id, v_inmate_a_uid, 'LOGIN', 'auth', 'A1234567', v_fac1_id, '{"ip":"127.0.0.1"}'::jsonb);
+
+  -- Insert Notification
+  INSERT INTO public.notifications (id, offender_id, type, title, message, read)
+  VALUES (v_notif_id, 'A1234567', 'TEST', 'Original Title', 'Original Message', false);
 
   PERFORM set_config('canteen.authorized_transaction', 'false', true);
 END $$;
 
 -- ==============================================================================
--- TEST 1: Anonymous (anon) User Access Lockout (RLS Verification)
+-- TEST 1: Anonymous (anon) User Access Lockout (Table Grant Revocation & RLS Perimeter)
 -- ==============================================================================
 DO $$
 DECLARE
-  v_offender_count INTEGER;
-  v_order_count INTEGER;
-  v_audit_count INTEGER;
+  v_offenders_exist INTEGER;
+  v_orders_exist INTEGER;
+  v_audit_exist INTEGER;
+  v_offender_blocked BOOLEAN := false;
+  v_order_blocked BOOLEAN := false;
+  v_audit_blocked BOOLEAN := false;
+  v_offender_mech TEXT := '';
+  v_order_mech TEXT := '';
+  v_audit_mech TEXT := '';
+  v_count INTEGER;
+  v_err_code TEXT := '';
+  v_err_msg TEXT := '';
 BEGIN
+  -- 1. Baseline Verification as postgres: Prove that target test records physically exist
   RESET ROLE;
+  SELECT COUNT(*) INTO v_offenders_exist FROM public.offenders WHERE id IN ('A1234567', 'B7654321');
+  SELECT COUNT(*) INTO v_orders_exist FROM public.orders WHERE id IN ('99999999-9999-9999-9999-999999999991', '99999999-9999-9999-9999-999999999992');
+  SELECT COUNT(*) INTO v_audit_exist FROM public.audit_logs WHERE id = 'aaaaaaaa-3333-3333-3333-aaaaaaaaaaaa';
+
+  IF v_offenders_exist < 2 OR v_orders_exist < 2 OR v_audit_exist < 1 THEN
+    RAISE EXCEPTION 'TEST 1 SETUP INTEGRITY FAILED: Test fixture records missing in database (offenders: %, orders: %, audit: %)',
+      v_offenders_exist, v_orders_exist, v_audit_exist;
+  END IF;
+
+  -- 2. Switch to anon role
   PERFORM set_config('request.jwt.claims', '', true);
   SET LOCAL ROLE anon;
 
-  SELECT COUNT(*) INTO v_offender_count FROM public.offenders;
-  SELECT COUNT(*) INTO v_order_count FROM public.orders;
-  SELECT COUNT(*) INTO v_audit_count FROM public.audit_logs;
+  -- 3. Check offenders access
+  v_err_code := '';
+  v_err_msg := '';
+  BEGIN
+    SELECT COUNT(*) INTO v_count FROM public.offenders;
+    IF v_count = 0 THEN
+      v_offender_blocked := true;
+      v_offender_mech := 'RLS_FILTERED (0 rows)';
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err_code = RETURNED_SQLSTATE, v_err_msg = MESSAGE_TEXT;
+    IF v_err_code = '42501' OR v_err_msg ILIKE '%permission denied%' THEN
+      v_offender_blocked := true;
+      v_offender_mech := format('TABLE_GRANT_REVOKED (SQLSTATE %s)', v_err_code);
+    END IF;
+  END;
+
+  -- 4. Check orders access
+  v_err_code := '';
+  v_err_msg := '';
+  BEGIN
+    SELECT COUNT(*) INTO v_count FROM public.orders;
+    IF v_count = 0 THEN
+      v_order_blocked := true;
+      v_order_mech := 'RLS_FILTERED (0 rows)';
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err_code = RETURNED_SQLSTATE, v_err_msg = MESSAGE_TEXT;
+    IF v_err_code = '42501' OR v_err_msg ILIKE '%permission denied%' THEN
+      v_order_blocked := true;
+      v_order_mech := format('TABLE_GRANT_REVOKED (SQLSTATE %s)', v_err_code);
+    END IF;
+  END;
+
+  -- 5. Check audit_logs access
+  v_err_code := '';
+  v_err_msg := '';
+  BEGIN
+    SELECT COUNT(*) INTO v_count FROM public.audit_logs;
+    IF v_count = 0 THEN
+      v_audit_blocked := true;
+      v_audit_mech := 'RLS_FILTERED (0 rows)';
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err_code = RETURNED_SQLSTATE, v_err_msg = MESSAGE_TEXT;
+    IF v_err_code = '42501' OR v_err_msg ILIKE '%permission denied%' THEN
+      v_audit_blocked := true;
+      v_audit_mech := format('TABLE_GRANT_REVOKED (SQLSTATE %s)', v_err_code);
+    END IF;
+  END;
 
   RESET ROLE;
-  IF v_offender_count = 0 AND v_order_count = 0 AND v_audit_count = 0 THEN
-    INSERT INTO test_results VALUES (1, 'Anon role cannot query offenders, orders, or audit logs', true, 'All counts 0; RLS blocked anon visibility');
+  IF v_offender_blocked AND v_order_blocked AND v_audit_blocked THEN
+    INSERT INTO test_results VALUES (1, 'Anon role cannot query offenders, orders, or audit logs', true,
+      format('Offenders: %s; Orders: %s; Audit: %s (Fixtures verified: 2 offenders, 2 orders, 1 audit)',
+             v_offender_mech, v_order_mech, v_audit_mech));
   ELSE
-    INSERT INTO test_results VALUES (1, 'Anon role leaked private records', false, format('Offenders: %s, Orders: %s, Audit: %s', v_offender_count, v_order_count, v_audit_count));
+    INSERT INTO test_results VALUES (1, 'Anon role access lockout failed', false,
+      format('Offenders: %s, Orders: %s, Audit: %s', v_offender_blocked, v_order_blocked, v_audit_blocked));
   END IF;
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE;
-  INSERT INTO test_results VALUES (1, 'Anon query failed with unexpected error', false, SQLERRM);
+  INSERT INTO test_results VALUES (1, 'Anon query test error', false, SQLERRM);
 END $$;
 
 -- ==============================================================================
@@ -323,36 +609,81 @@ END $$;
 -- ==============================================================================
 DO $$
 DECLARE
+  v_pick1_id UUID := 'bbbb1111-bbbb-1111-bbbb-111111111111';
+  v_pick2_id UUID := 'bbbb2222-bbbb-2222-bbbb-222222222222';
+  v_order1_id UUID := '99999999-9999-9999-9999-999999999991';
+  v_order2_id UUID := '99999999-9999-9999-9999-999999999992';
+  v_fac1_picks INTEGER;
+  v_fac2_picks INTEGER;
   v_fac2_orders INTEGER;
-  v_insert_blocked BOOLEAN := false;
+  v_own_updated INTEGER := 0;
+  v_cross_updated INTEGER := 0;
+  v_reassign_rows INTEGER := 0;
+  v_reassign_blocked BOOLEAN := false;
   v_err_code TEXT := '';
   v_err_msg TEXT := '';
+  v_stored_p1_order UUID;
+  v_stored_p1_status TEXT;
+  v_stored_p2_order UUID;
+  v_stored_p2_status TEXT;
 BEGIN
   RESET ROLE;
   PERFORM set_config('request.jwt.claims', '{"sub": "eeee5555-eeee-5555-eeee-555555555555", "role": "authenticated"}', true);
   SET LOCAL ROLE authenticated;
 
-  -- Warehouse Picker Facility 1 must NEVER see orders from Facility 2
+  -- 1. Visibility Check: Warehouse Picker Facility 1 can see Picking List 1 (Facility 1),
+  -- but must NEVER see Picking List 2 (Facility 2) or Orders from Facility 2.
+  SELECT COUNT(*) INTO v_fac1_picks FROM public.picking_lists WHERE id = v_pick1_id;
+  SELECT COUNT(*) INTO v_fac2_picks FROM public.picking_lists WHERE id = v_pick2_id;
   SELECT COUNT(*) INTO v_fac2_orders FROM public.orders WHERE facility_id = '22222222-2222-2222-2222-222222222222';
 
-  -- Verify WITH CHECK & Trigger: Warehouse Picker Facility 1 cannot insert picking list for Facility 2 order
+  -- 2. Legitimate Operation: Warehouse Picker Facility 1 CAN update Picking List 1 for own facility
+  UPDATE public.picking_lists SET status = 'IN_PROGRESS' WHERE id = v_pick1_id;
+  GET DIAGNOSTICS v_own_updated = ROW_COUNT;
+
+  -- 3. Blind Foreign Update: Warehouse Picker Facility 1 tries to update Picking List 2 (Facility 2)
+  -- RLS USING filter must hide it completely, resulting in 0 rows updated
+  UPDATE public.picking_lists SET status = 'COMPLETED' WHERE id = v_pick2_id;
+  GET DIAGNOSTICS v_cross_updated = ROW_COUNT;
+
+  -- 4. Cross-Facility Tamper Attack: Warehouse Picker Facility 1 attempts to reassign Picking List 1
+  -- to Order 2 (Facility 2).
+  -- This MUST be rejected specifically by the facility trigger (P0001) or RLS WITH CHECK (44000).
+  -- A general table grant denial (42501) or syntax error is strictly rejected as proof!
+  v_reassign_rows := 0;
+  v_reassign_blocked := false;
+  v_err_code := '';
+  v_err_msg := '';
   BEGIN
-    INSERT INTO public.picking_lists (order_id, status)
-    VALUES ('99999999-9999-9999-9999-999999999992', 'PENDING');
+    UPDATE public.picking_lists SET order_id = v_order2_id WHERE id = v_pick1_id;
+    GET DIAGNOSTICS v_reassign_rows = ROW_COUNT;
   EXCEPTION WHEN OTHERS THEN
+    v_reassign_rows := 0;
     GET STACKED DIAGNOSTICS v_err_code = RETURNED_SQLSTATE, v_err_msg = MESSAGE_TEXT;
-    -- Specific error verification: Must be RLS WITH CHECK (44000), trigger check (P0001), or grant denial (42501)
-    IF v_err_code IN ('44000', 'P0001', '42501') OR v_err_msg ILIKE '%row-level security%' OR v_err_msg ILIKE '%SECURITY VIOLATION%' THEN
-      v_insert_blocked := true;
+    -- Strictly check for facility isolation: trigger P0001 or RLS WITH CHECK 44000
+    IF (v_err_code IN ('P0001', '44000') OR v_err_msg ILIKE '%SECURITY VIOLATION%' OR v_err_msg ILIKE '%row-level security%')
+       AND v_err_code != '42501' AND v_err_msg NOT ILIKE '%permission denied%' THEN
+      v_reassign_blocked := true;
     END IF;
   END;
 
+  -- 5. Physical Verification: Reset role to postgres and inspect actual rows
   RESET ROLE;
-  IF v_fac2_orders = 0 AND v_insert_blocked THEN
-    INSERT INTO test_results VALUES (6, 'Warehouse Picker Facility 1 cannot see or create Facility 2 picking lists', true, format('Cross-facility segregation & security rejection verified [%s: %s]', v_err_code, v_err_msg));
+  SELECT order_id, status INTO v_stored_p1_order, v_stored_p1_status FROM public.picking_lists WHERE id = v_pick1_id;
+  SELECT order_id, status INTO v_stored_p2_order, v_stored_p2_status FROM public.picking_lists WHERE id = v_pick2_id;
+
+  IF v_fac1_picks = 1 AND v_fac2_picks = 0 AND v_fac2_orders = 0
+     AND v_own_updated = 1 AND v_cross_updated = 0
+     AND v_reassign_blocked AND COALESCE(v_reassign_rows, 0) = 0
+     AND v_stored_p1_order IS NOT DISTINCT FROM v_order1_id AND v_stored_p1_status = 'IN_PROGRESS'
+     AND v_stored_p2_order IS NOT DISTINCT FROM v_order2_id AND v_stored_p2_status = 'PENDING' THEN
+    INSERT INTO test_results VALUES (6, 'Warehouse Picker Facility 1 cross-facility isolation strictly enforced (RLS & trigger)', true,
+      format('Own pick updated (ROW_COUNT=%s); foreign pick hidden & unchanged (ROW_COUNT=%s); cross-facility reassign blocked [%s: %s], order_id unchanged',
+             v_own_updated, v_cross_updated, v_err_code, v_err_msg));
   ELSE
     INSERT INTO test_results VALUES (6, 'Warehouse Picker Facility 1 cross-facility isolation breached', false,
-      format('Fac2 visible orders: %s, Insert blocked: %s, Code: %s, Msg: %s', v_fac2_orders, v_insert_blocked, v_err_code, v_err_msg));
+      format('Fac1 picks: %s, Fac2 picks: %s, Fac2 orders: %s, Own update: %s, Cross update: %s, Reassign blocked: %s (rows: %s, code: %s), P1 order: %s, P1 status: %s',
+             v_fac1_picks, v_fac2_picks, v_fac2_orders, v_own_updated, v_cross_updated, v_reassign_blocked, v_reassign_rows, v_err_code, v_stored_p1_order, v_stored_p1_status));
   END IF;
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE;
@@ -372,16 +703,21 @@ DECLARE
   v_err_code TEXT := '';
   v_err_msg TEXT := '';
 BEGIN
-  -- Setup notification as postgres
+  -- Ensure test notification fixture is in its pristine unread state
   RESET ROLE;
   INSERT INTO public.notifications (id, offender_id, type, title, message, read)
-  VALUES (v_notif_id, 'A1234567', 'TEST', 'Original Title', 'Original Message', false);
+  VALUES (v_notif_id, 'A1234567', 'TEST', 'Original Title', 'Original Message', false)
+  ON CONFLICT (id) DO UPDATE
+  SET title = 'Original Title', message = 'Original Message', read = false;
 
   -- Switch to authenticated inmate
   PERFORM set_config('request.jwt.claims', '{"sub": "aaaa1111-aaaa-1111-aaaa-111111111111", "role": "authenticated"}', true);
   SET LOCAL ROLE authenticated;
 
   -- Attempt to modify notification title or message (must fail via column privilege revocation 42501 or trigger P0001)
+  v_tamper_blocked := false;
+  v_err_code := '';
+  v_err_msg := '';
   BEGIN
     UPDATE public.notifications SET title = 'Forged Title' WHERE id = v_notif_id;
   EXCEPTION WHEN OTHERS THEN
@@ -392,6 +728,8 @@ BEGIN
   END;
 
   -- Legitimate update: marking notification as read (must succeed and update exactly 1 row)
+  v_rows_updated := 0;
+  v_read_updated := false;
   BEGIN
     UPDATE public.notifications SET read = true WHERE id = v_notif_id;
     GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
@@ -399,6 +737,7 @@ BEGIN
       v_read_updated := true;
     END IF;
   EXCEPTION WHEN OTHERS THEN
+    v_rows_updated := 0;
     v_read_updated := false;
   END;
 
@@ -507,6 +846,9 @@ BEGIN
   SET LOCAL ROLE authenticated;
 
   -- Attempt to self-assign ADMIN role (must be rejected by column privilege revocation 42501 or trigger P0001)
+  v_elevation_blocked := false;
+  v_err_code := '';
+  v_err_msg := '';
   BEGIN
     UPDATE public.user_profiles SET role = 'ADMIN' WHERE id = 'cccc3333-cccc-3333-cccc-333333333333';
   EXCEPTION WHEN OTHERS THEN
@@ -517,6 +859,8 @@ BEGIN
   END;
 
   -- Allowed update: updating display name (must succeed and update exactly 1 row)
+  v_rows_updated := 0;
+  v_name_updated := false;
   BEGIN
     UPDATE public.user_profiles SET name = 'Updated Family Name' WHERE id = 'cccc3333-cccc-3333-cccc-333333333333';
     GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
@@ -524,6 +868,7 @@ BEGIN
       v_name_updated := true;
     END IF;
   EXCEPTION WHEN OTHERS THEN
+    v_rows_updated := 0;
     v_name_updated := false;
   END;
 
@@ -545,10 +890,12 @@ END $$;
 -- ==============================================================================
 DO $$
 DECLARE
-  v_self_approve_blocked BOOLEAN := false;
+  v_pre_check INTEGER := 0;
   v_pending_request_allowed BOOLEAN := false;
+  v_self_approve_blocked BOOLEAN := false;
   v_status_elevate_blocked BOOLEAN := false;
-  v_rows_inserted INTEGER := 0;
+  v_rows_inserted_pending INTEGER := 0;
+  v_rows_inserted_approve INTEGER := 0;
   v_rows_updated INTEGER := 0;
   v_stored_status TEXT;
   v_err_code TEXT := '';
@@ -557,71 +904,104 @@ DECLARE
   v_elevation_err_msg TEXT := '';
   v_elevation_caught_by_security BOOLEAN := false;
 BEGIN
+  -- Safety pre-clean: Ensure no leftover link exists between Family Account 2 and Inmate A
   RESET ROLE;
+  DELETE FROM public.family_offender_links
+  WHERE family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'A1234567';
+
+  SELECT COUNT(*) INTO v_pre_check
+  FROM public.family_offender_links
+  WHERE family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'A1234567';
+
+  IF v_pre_check != 0 THEN
+    RAISE EXCEPTION 'TEST 11 PRE-CHECK FAILED: Existing relationship link could not be cleaned.';
+  END IF;
+
   PERFORM set_config('request.jwt.claims', '{"sub": "dddd4444-dddd-4444-dddd-444444444444", "role": "authenticated"}', true);
   SET LOCAL ROLE authenticated;
 
-  -- Attempt 1: Insert link with status = APPROVED (Self-approval attack - must fail via RLS WITH CHECK 44000 or trigger P0001)
-  BEGIN
-    INSERT INTO public.family_offender_links (family_account_id, offender_id, status, relationship)
-    VALUES ('77777777-7777-7777-7777-777777777772', 'A1234567', 'APPROVED', 'Friend');
-  EXCEPTION WHEN OTHERS THEN
-    GET STACKED DIAGNOSTICS v_err_code = RETURNED_SQLSTATE, v_err_msg = MESSAGE_TEXT;
-    IF v_err_code IN ('44000', 'P0001', '42501') OR v_err_msg ILIKE '%row-level security%' OR v_err_msg ILIKE '%SECURITY VIOLATION%' THEN
-      v_self_approve_blocked := true;
-    END IF;
-  END;
-
-  -- Attempt 2: Insert link with status = PENDING (Valid relationship request - must succeed and insert exactly 1 row)
+  -- Step 1: Prove valid link request with status = PENDING succeeds FIRST.
+  -- This proves that the family user DOES possess table INSERT privileges, ensuring that
+  -- subsequent approval rejection is truly enforced by security policy, not lack of table grants.
+  v_rows_inserted_pending := 0;
   BEGIN
     INSERT INTO public.family_offender_links (family_account_id, offender_id, status, relationship)
     VALUES ('77777777-7777-7777-7777-777777777772', 'A1234567', 'PENDING', 'Friend');
-    GET DIAGNOSTICS v_rows_inserted = ROW_COUNT;
-    IF v_rows_inserted = 1 THEN
+    GET DIAGNOSTICS v_rows_inserted_pending = ROW_COUNT;
+    IF v_rows_inserted_pending = 1 THEN
       v_pending_request_allowed := true;
     END IF;
   EXCEPTION WHEN OTHERS THEN
+    v_rows_inserted_pending := 0;
     v_pending_request_allowed := false;
   END;
 
-  -- Attempt 3: Try to elevate status from PENDING to APPROVED (Self-approval elevation attack)
+  -- Step 2: Attempt self-approval elevation on existing link from PENDING to APPROVED
+  -- Must be rejected by RLS policy (v_rows_updated = 0) or trigger (P0001) / RLS WITH CHECK (44000).
+  -- A general table privilege denial (42501) is strictly rejected as proof!
+  v_rows_updated := 0;
+  v_elevation_err_code := '';
+  v_elevation_err_msg := '';
+  v_elevation_caught_by_security := false;
   BEGIN
     UPDATE public.family_offender_links
     SET status = 'APPROVED'
     WHERE family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'A1234567';
     GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
   EXCEPTION WHEN OTHERS THEN
+    v_rows_updated := 0;
     GET STACKED DIAGNOSTICS v_elevation_err_code = RETURNED_SQLSTATE, v_elevation_err_msg = MESSAGE_TEXT;
-    -- Only specific security errors count as legitimate blocks:
-    IF v_elevation_err_code IN ('P0001', '42501', '44000') OR v_elevation_err_msg ILIKE '%SECURITY VIOLATION%' OR v_elevation_err_msg ILIKE '%permission denied%' THEN
+    IF (v_elevation_err_code IN ('P0001', '44000') OR v_elevation_err_msg ILIKE '%SECURITY VIOLATION%' OR v_elevation_err_msg ILIKE '%row-level security%')
+       AND v_elevation_err_code != '42501' AND v_elevation_err_msg NOT ILIKE '%permission denied%' THEN
       v_elevation_caught_by_security := true;
     END IF;
   END;
 
-  -- Crucial Verification Step:
-  -- Reset role to postgres (trusted superuser context) to query physical database state.
-  -- Verification requires EITHER:
-  --   a) A specific security exception was raised (trigger P0001 or permission 42501), OR
-  --   b) RLS hid the row from update (v_rows_updated = 0)
-  -- AND the stored physical status must strictly remain 'PENDING'.
+  -- Step 3: Attempt direct insert of status = APPROVED on a new pair (Inmate B)
+  -- Must fail via RLS WITH CHECK (44000) or trigger (P0001); 42501 is strictly rejected
+  v_rows_inserted_approve := 0;
+  v_err_code := '';
+  v_err_msg := '';
+  v_self_approve_blocked := false;
+  BEGIN
+    INSERT INTO public.family_offender_links (family_account_id, offender_id, status, relationship)
+    VALUES ('77777777-7777-7777-7777-777777777772', 'B7654321', 'APPROVED', 'Friend');
+    GET DIAGNOSTICS v_rows_inserted_approve = ROW_COUNT;
+  EXCEPTION WHEN OTHERS THEN
+    v_rows_inserted_approve := 0;
+    GET STACKED DIAGNOSTICS v_err_code = RETURNED_SQLSTATE, v_err_msg = MESSAGE_TEXT;
+    IF (v_err_code IN ('44000', 'P0001') OR v_err_msg ILIKE '%row-level security%' OR v_err_msg ILIKE '%SECURITY VIOLATION%')
+       AND v_err_code != '42501' AND v_err_msg NOT ILIKE '%permission denied%' THEN
+      v_self_approve_blocked := true;
+    END IF;
+  END;
+
+  -- Step 4: Reset role to postgres and inspect actual stored database state
   RESET ROLE;
 
   SELECT status INTO v_stored_status
   FROM public.family_offender_links
   WHERE family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'A1234567';
 
-  IF (v_elevation_caught_by_security OR v_rows_updated = 0) AND v_stored_status = 'PENDING' THEN
+  -- Handle ROW_COUNT = 0 explicitly:
+  -- The update is blocked if either a security exception was raised OR 0 rows were updated by RLS without generic 42501,
+  -- AND the stored physical status must strictly remain 'PENDING'
+  IF (v_elevation_caught_by_security OR (COALESCE(v_rows_updated, 0) = 0 AND v_elevation_err_code = ''))
+     AND v_stored_status IS NOT DISTINCT FROM 'PENDING' THEN
     v_status_elevate_blocked := true;
   ELSE
     v_status_elevate_blocked := false;
   END IF;
 
-  IF v_self_approve_blocked AND v_pending_request_allowed AND v_status_elevate_blocked THEN
-    INSERT INTO test_results VALUES (11, 'Family relationship links require institutional staff approval; self-approval strictly rejected', true, 'Direct APPROVED insert blocked; PENDING allowed (ROW_COUNT=1); elevation to APPROVED blocked (verified physical status remains PENDING)');
+  IF v_pre_check = 0 AND v_pending_request_allowed AND v_rows_inserted_pending = 1
+     AND v_status_elevate_blocked AND v_self_approve_blocked AND COALESCE(v_rows_inserted_approve, 0) = 0 THEN
+    INSERT INTO test_results VALUES (11, 'Family relationship links require institutional staff approval; self-approval strictly rejected', true,
+      format('PENDING insert succeeded (ROW_COUNT=1); elevation blocked (ROW_COUNT=%s, security_exception=%s, physical status remains %s); direct APPROVED insert blocked [%s]',
+             v_rows_updated, v_elevation_caught_by_security, v_stored_status, v_err_code));
   ELSE
     INSERT INTO test_results VALUES (11, 'Family relationship link integrity breached', false,
-      format('Self-approve blocked: %s, Pending allowed: %s (Rows: %s), Stored status: %s (Elevate blocked: %s, Rows updated: %s, Err: %s)',
-             v_self_approve_blocked, v_pending_request_allowed, v_rows_inserted, v_stored_status, v_status_elevate_blocked, v_rows_updated, v_elevation_err_code));
+      format('Pre-check: %s, Pending allowed: %s (Rows: %s), Stored status: %s (Elevate blocked: %s, Rows updated: %s, Elevate err: %s), Direct approve blocked: %s (Direct err: %s)',
+             v_pre_check, v_pending_request_allowed, v_rows_inserted_pending, v_stored_status, v_status_elevate_blocked, v_rows_updated, v_elevation_err_code, v_self_approve_blocked, v_err_code));
   END IF;
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE;
@@ -629,33 +1009,7 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 
 -- ==============================================================================
--- TEST 12: Sequence Monotonicity & Non-Transactional Side-Effect Audit (Static Check)
--- ==============================================================================
--- CLASSIFICATION: RUNTIME NON-SECURITY SEQUENCE TEST
--- AUDIT NOTICE: PostgreSQL sequence nextval() calls are strictly non-transactional
--- and will NOT roll back at the end of this script. Running this test permanently
--- increments public.order_number_seq.
-DO $$
-DECLARE
-  v_seq1 BIGINT;
-  v_seq2 BIGINT;
-BEGIN
-  RESET ROLE;
-  v_seq1 := nextval('public.order_number_seq');
-  v_seq2 := nextval('public.order_number_seq');
-
-  IF v_seq2 > v_seq1 THEN
-    INSERT INTO test_results VALUES (12, '[RUNTIME NON-SECURITY TEST] Atomic order sequence produces strictly monotonic numbers', true, format('Sequence stepped from %s to %s (Permanent sequence side-effect noted)', v_seq1, v_seq2));
-  ELSE
-    INSERT INTO test_results VALUES (12, '[RUNTIME NON-SECURITY TEST] Order sequence collision detected', false, format('seq1: %s, seq2: %s', v_seq1, v_seq2));
-  END IF;
-EXCEPTION WHEN OTHERS THEN
-  RESET ROLE;
-  INSERT INTO test_results VALUES (12, '[RUNTIME NON-SECURITY TEST] Sequence test error', false, SQLERRM);
-END $$;
-
--- ==============================================================================
--- TEST 13: Inmate Order Placement Anti-Spoofing & Service Role Gate (RPC Security Verification)
+-- TEST 12: Inmate Order Placement Anti-Spoofing & Service Role Gate (RPC Security Verification)
 -- ==============================================================================
 DO $$
 DECLARE
@@ -717,12 +1071,12 @@ BEGIN
   SELECT balance INTO v_inmate_b_bal_after FROM public.offenders WHERE id = 'B7654321';
 
   -- Order 1 (1-arg) must belong to Inmate A
-  IF v_order1_offender = 'A1234567' THEN
+  IF v_order1_offender IS NOT DISTINCT FROM 'A1234567' THEN
     v_one_arg_ok := true;
   END IF;
 
   -- Order 2 (2-arg spoof attempt) must STILL belong to Inmate A ('A1234567'), NOT Inmate B ('B7654321')
-  IF v_order2_offender = 'A1234567' THEN
+  IF v_order2_offender IS NOT DISTINCT FROM 'A1234567' THEN
     v_spoof_prevented := true;
   END IF;
 
@@ -795,22 +1149,22 @@ BEGIN
   SELECT offender_id INTO v_order3_offender FROM public.orders WHERE id = v_order3_id;
   SELECT balance INTO v_inmate_b_bal_final FROM public.offenders WHERE id = 'B7654321';
 
-  IF v_order3_offender = 'B7654321' AND v_inmate_b_bal_final = (v_inmate_b_bal_after - 3.00) THEN
+  IF v_order3_offender IS NOT DISTINCT FROM 'B7654321' AND v_inmate_b_bal_final = (v_inmate_b_bal_after - 3.00) THEN
     v_service_role_order_ok := true;
   END IF;
 
   IF v_one_arg_ok AND v_spoof_prevented AND v_balance_integrity_ok AND v_unauthorized_blocked AND v_anon_blocked AND v_service_role_null_blocked AND v_service_role_order_ok THEN
-    INSERT INTO test_results VALUES (13, 'Inmate order placement anti-spoofing, balance integrity, and dual-mode role gates enforced', true,
-      format('Inmate A 1-arg & 2-arg orders created ($82.50 -> $77.50); Inmate B untouched until authorized service_role call ($50.00 -> $47.50); Family and Anon rejected',
-             v_inmate_a_bal_before, v_inmate_a_bal_after, v_inmate_b_bal_after));
+    INSERT INTO test_results VALUES (12, 'Inmate order placement anti-spoofing, balance integrity, and dual-mode role gates enforced', true,
+      format('Inmate A 1-arg & 2-arg orders created ($%s -> $%s); Inmate B untouched until authorized service_role call ($%s -> $%s); Family and Anon rejected',
+             v_inmate_a_bal_before, v_inmate_a_bal_after, v_inmate_b_bal_before, v_inmate_b_bal_final));
   ELSE
-    INSERT INTO test_results VALUES (13, 'Inmate order placement security gate breached', false,
+    INSERT INTO test_results VALUES (12, 'Inmate order placement security gate breached', false,
       format('1-arg: %s, Spoof prevented: %s, Bal integrity: %s, Family blocked: %s, Anon blocked: %s, ServiceRole null blocked: %s, ServiceRole order ok: %s',
              v_one_arg_ok, v_spoof_prevented, v_balance_integrity_ok, v_unauthorized_blocked, v_anon_blocked, v_service_role_null_blocked, v_service_role_order_ok));
   END IF;
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE;
-  INSERT INTO test_results VALUES (13, 'Inmate order placement anti-spoof check error', false, SQLERRM);
+  INSERT INTO test_results VALUES (12, 'Inmate order placement anti-spoof check error', false, SQLERRM);
 END $$;
 
 -- ==============================================================================
@@ -827,6 +1181,7 @@ ORDER BY test_num ASC;
 -- ==============================================================================
 -- ROLLBACK ALL TEST FIXTURES
 -- ==============================================================================
--- WARNING: All database table changes roll back here.
--- Sequence increments generated by nextval() in Tests 12 and 13 persist permanently.
+-- NOTE: All table data changes strictly roll back here.
+-- Sequence notice: Order placement in Test 12 internally calls nextval('public.order_number_seq');
+-- sequence increments are non-transactional in PostgreSQL and will not be rolled back.
 ROLLBACK;
