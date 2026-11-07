@@ -2,9 +2,24 @@ import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 import prisma from './db';
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'canteen-corner-super-secure-production-jwt-key-2026-correctional-facility'
-);
+/**
+ * Retrieves and validates the server-side JWT secret key.
+ * 
+ * SECURITY MANDATE:
+ * 1. Read exclusively from process.env.JWT_SECRET.
+ * 2. Fail securely with a configuration error if missing or empty.
+ * 3. Never use or generate a hardcoded default fallback.
+ * 4. Never print or reveal the secret value in logs or client exceptions.
+ */
+function getJwtSecretKey(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || typeof secret !== 'string' || secret.trim().length === 0) {
+    throw new Error(
+      'SERVER CONFIGURATION ERROR: JWT_SECRET environment variable is missing or empty. A secure random secret is required to sign and verify sessions.'
+    );
+  }
+  return new TextEncoder().encode(secret.trim());
+}
 
 export interface SessionPayload {
   userId?: string;
@@ -19,18 +34,21 @@ export interface SessionPayload {
 const COOKIE_NAME = 'canteen_session';
 
 export async function signSession(payload: SessionPayload): Promise<string> {
-  // Session timeout: 2 hours for normal users, or 30 mins for inmates on shared kiosks
+  const secretKey = getJwtSecretKey();
+  // Session timeout: 4 hours for normal users, or 30 mins for inmates on shared kiosks
   const expiresIn = payload.role === 'INMATE' ? '30m' : '4h';
   return await new SignJWT({ ...payload })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(expiresIn)
-    .sign(JWT_SECRET);
+    .sign(secretKey);
 }
 
 export async function verifySession(token: string): Promise<SessionPayload | null> {
+  // Validates server configuration before verifying token integrity
+  const secretKey = getJwtSecretKey();
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const { payload } = await jwtVerify(token, secretKey);
     return payload as unknown as SessionPayload;
   } catch {
     return null;
