@@ -5,6 +5,26 @@ import { signSession } from '@/lib/auth';
 import { logAuditAction } from '@/lib/audit';
 import { z } from 'zod';
 
+// Sliding-window IP rate limiter to protect against remote brute-force and Account-Lockout DoS
+const loginRateLimits = new Map<string, { count: number; resetTime: number }>();
+
+function checkLoginRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const limit = loginRateLimits.get(ip);
+
+  if (!limit || now > limit.resetTime) {
+    loginRateLimits.set(ip, { count: 1, resetTime: now + 10 * 60 * 1000 }); // 10 min window
+    return true;
+  }
+
+  if (limit.count >= 10) { // Max 10 attempts per IP per 10 mins
+    return false;
+  }
+
+  limit.count += 1;
+  return true;
+}
+
 const InmateLoginSchema = z.object({
   offenderId: z.string().trim().min(1, 'Offender ID is required'),
   pin: z.string().trim().min(4, 'PIN must be at least 4 digits'),
@@ -12,6 +32,14 @@ const InmateLoginSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || '127.0.0.1';
+    if (!checkLoginRateLimit(ip)) {
+      return NextResponse.json(
+        { error: 'Too many login attempts from this terminal/network. Please try again in 10 minutes or contact unit staff.' },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json();
     const result = InmateLoginSchema.safeParse(body);
 

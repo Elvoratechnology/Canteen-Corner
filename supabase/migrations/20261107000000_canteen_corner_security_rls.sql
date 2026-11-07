@@ -363,7 +363,7 @@ CREATE TRIGGER trg_deposit_facility_consistency
 -- 6. SECURITY & AUTHENTICATION HELPER FUNCTIONS
 -- ==============================================================================
 
--- Helper: Get current user's profile record
+-- Helper: Get current user's profile record (enforces active account status)
 CREATE OR REPLACE FUNCTION public.current_profile()
 RETURNS public.user_profiles AS $$
   SELECT * FROM public.user_profiles
@@ -371,7 +371,7 @@ RETURNS public.user_profiles AS $$
   LIMIT 1;
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
--- Helper: Get current user's role
+-- Helper: Get current user's role (enforces active account status)
 CREATE OR REPLACE FUNCTION public.current_user_role()
 RETURNS public.user_role AS $$
   SELECT role FROM public.user_profiles
@@ -379,7 +379,7 @@ RETURNS public.user_role AS $$
   LIMIT 1;
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
--- Helper: Get current user's facility ID
+-- Helper: Get current user's facility ID (enforces active account status)
 CREATE OR REPLACE FUNCTION public.current_user_facility()
 RETURNS UUID AS $$
   SELECT facility_id FROM public.user_profiles
@@ -387,33 +387,38 @@ RETURNS UUID AS $$
   LIMIT 1;
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
--- Helper: Get offender ID linked to current inmate user
+-- Helper: Get offender ID linked to current inmate user (strictly checks is_active = true)
 CREATE OR REPLACE FUNCTION public.current_inmate_offender_id()
 RETURNS TEXT AS $$
-  SELECT id FROM public.offenders
-  WHERE user_id = auth.uid()
+  SELECT o.id FROM public.offenders o
+  JOIN public.user_profiles up ON up.id = o.user_id
+  WHERE o.user_id = auth.uid() AND up.is_active = true
   LIMIT 1;
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
--- Helper: Get family account ID linked to current family user
+-- Helper: Get family account ID linked to current family user (strictly checks is_active = true)
 CREATE OR REPLACE FUNCTION public.current_family_account_id()
 RETURNS UUID AS $$
-  SELECT id FROM public.family_accounts
-  WHERE user_id = auth.uid()
+  SELECT fa.id FROM public.family_accounts fa
+  JOIN public.user_profiles up ON up.id = fa.user_id
+  WHERE fa.user_id = auth.uid() AND up.is_active = true
   LIMIT 1;
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
--- Helper: Verify if family account is explicitly authorized to access an offender
+-- Helper: Verify if family account is explicitly authorized to access an offender (strictly checks is_active = true)
 CREATE OR REPLACE FUNCTION public.is_family_authorized_for_offender(
   p_family_account_id UUID,
   p_offender_id TEXT
 )
 RETURNS BOOLEAN AS $$
   SELECT EXISTS (
-    SELECT 1 FROM public.family_offender_links
-    WHERE family_account_id = p_family_account_id
-      AND offender_id = p_offender_id
-      AND status = 'APPROVED'
+    SELECT 1 FROM public.family_offender_links fol
+    JOIN public.family_accounts fa ON fa.id = fol.family_account_id
+    JOIN public.user_profiles up ON up.id = fa.user_id
+    WHERE fol.family_account_id = p_family_account_id
+      AND fol.offender_id = p_offender_id
+      AND fol.status = 'APPROVED'
+      AND up.is_active = true
   );
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 
@@ -421,16 +426,39 @@ $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 -- 7. IMMUTABLE ROLE INTEGRITY & PRIVILEGE ELEVATION PROTECTION
 -- ==============================================================================
 
--- Trigger: Prevent users from assigning or modifying their own roles or facilities
+-- Trigger: Prevent users from assigning or modifying their own roles, facilities, staff IDs, or active status
 CREATE OR REPLACE FUNCTION public.prevent_unauthorized_role_change()
 RETURNS TRIGGER AS $$
+DECLARE
+  v_caller_role public.user_role;
 BEGIN
   IF auth.uid() IS NOT NULL THEN
-    IF NEW.role IS DISTINCT FROM OLD.role THEN
-      RAISE EXCEPTION 'SECURITY VIOLATION: Role elevation is strictly prohibited.';
+    v_caller_role := public.current_user_role();
+
+    -- Any non-admin user is strictly blocked from modifying role, facility, active status, or staff id
+    IF v_caller_role IS DISTINCT FROM 'ADMIN' THEN
+      IF NEW.role IS DISTINCT FROM OLD.role THEN
+        RAISE EXCEPTION 'SECURITY VIOLATION: Role elevation is strictly prohibited.';
+      END IF;
+      IF NEW.facility_id IS DISTINCT FROM OLD.facility_id THEN
+        RAISE EXCEPTION 'SECURITY VIOLATION: Facility assignment cannot be modified by user.';
+      END IF;
+      IF NEW.is_active IS DISTINCT FROM OLD.is_active THEN
+        RAISE EXCEPTION 'SECURITY VIOLATION: Account activation status can only be modified by administrators.';
+      END IF;
+      IF NEW.staff_id IS DISTINCT FROM OLD.staff_id THEN
+        RAISE EXCEPTION 'SECURITY VIOLATION: Staff ID cannot be modified by user.';
+      END IF;
     END IF;
-    IF NEW.facility_id IS DISTINCT FROM OLD.facility_id THEN
-      RAISE EXCEPTION 'SECURITY VIOLATION: Cross-facility re-assignment is prohibited.';
+
+    -- Even an ADMIN updating their own row cannot alter their role or deactivate themselves
+    IF auth.uid() = OLD.id THEN
+      IF NEW.role IS DISTINCT FROM OLD.role THEN
+        RAISE EXCEPTION 'SECURITY VIOLATION: Administrators cannot modify their own administrative role.';
+      END IF;
+      IF NEW.is_active IS DISTINCT FROM OLD.is_active AND NEW.is_active = false THEN
+        RAISE EXCEPTION 'SECURITY VIOLATION: Administrators cannot deactivate their own active account.';
+      END IF;
     END IF;
   END IF;
   NEW.updated_at = now();
@@ -443,6 +471,37 @@ CREATE TRIGGER trg_prevent_role_change
   BEFORE UPDATE ON public.user_profiles
   FOR EACH ROW
   EXECUTE FUNCTION public.prevent_unauthorized_role_change();
+
+-- Trigger: Prevent self-approval on family relationship links
+CREATE OR REPLACE FUNCTION public.check_family_link_status_guard()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- If status is being set to APPROVED or BLOCKED, verify caller is authorized staff
+  IF NEW.status IN ('APPROVED', 'BLOCKED') THEN
+    IF (OLD IS NULL OR OLD.status IS DISTINCT FROM NEW.status) THEN
+      IF auth.role() IS DISTINCT FROM 'service_role' AND public.current_user_role() NOT IN ('ADMIN', 'WAREHOUSE_SUPERVISOR') THEN
+        RAISE EXCEPTION 'SECURITY VIOLATION: Relationship approval or blocking requires institutional staff authorization.';
+      END IF;
+    END IF;
+  END IF;
+
+  -- Family accounts cannot modify linked offender or family account on existing records
+  IF OLD IS NOT NULL AND auth.role() IS DISTINCT FROM 'service_role' THEN
+    IF NEW.family_account_id IS DISTINCT FROM OLD.family_account_id OR NEW.offender_id IS DISTINCT FROM OLD.offender_id THEN
+      RAISE EXCEPTION 'SECURITY VIOLATION: Cannot reassign family account or inmate on an existing relationship link.';
+    END IF;
+  END IF;
+
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+DROP TRIGGER IF EXISTS trg_family_link_status_guard ON public.family_offender_links;
+CREATE TRIGGER trg_family_link_status_guard
+  BEFORE INSERT OR UPDATE ON public.family_offender_links
+  FOR EACH ROW
+  EXECUTE FUNCTION public.check_family_link_status_guard();
 
 -- Trigger: Prevent direct modification of financial balance columns on offenders
 CREATE OR REPLACE FUNCTION public.prevent_direct_balance_tampering()
@@ -610,8 +669,8 @@ CREATE POLICY "profiles_select_self_or_facility" ON public.user_profiles
 DROP POLICY IF EXISTS "profiles_update_self" ON public.user_profiles;
 CREATE POLICY "profiles_update_self" ON public.user_profiles
   FOR UPDATE TO authenticated
-  USING (id = auth.uid())
-  WITH CHECK (id = auth.uid());
+  USING (id = auth.uid() AND is_active = true)
+  WITH CHECK (id = auth.uid() AND is_active = true);
 
 -- ------------------------------------------------------------------------------
 -- 8.3 OFFENDERS POLICIES
@@ -646,35 +705,82 @@ DROP POLICY IF EXISTS "family_accounts_select" ON public.family_accounts;
 CREATE POLICY "family_accounts_select" ON public.family_accounts
   FOR SELECT TO authenticated
   USING (
-    user_id = auth.uid()
+    (
+      user_id = auth.uid()
+      AND EXISTS (SELECT 1 FROM public.user_profiles up WHERE up.id = auth.uid() AND up.is_active = true)
+    )
     OR (public.current_user_role() = 'ADMIN')
   );
 
 DROP POLICY IF EXISTS "family_accounts_insert" ON public.family_accounts;
 CREATE POLICY "family_accounts_insert" ON public.family_accounts
   FOR INSERT TO authenticated
-  WITH CHECK (user_id = auth.uid());
+  WITH CHECK (
+    user_id = auth.uid()
+    AND EXISTS (SELECT 1 FROM public.user_profiles up WHERE up.id = auth.uid() AND up.is_active = true)
+  );
 
 DROP POLICY IF EXISTS "family_accounts_update" ON public.family_accounts;
 CREATE POLICY "family_accounts_update" ON public.family_accounts
   FOR UPDATE TO authenticated
-  USING (user_id = auth.uid())
-  WITH CHECK (user_id = auth.uid());
+  USING (
+    user_id = auth.uid()
+    AND EXISTS (SELECT 1 FROM public.user_profiles up WHERE up.id = auth.uid() AND up.is_active = true)
+  )
+  WITH CHECK (
+    user_id = auth.uid()
+    AND EXISTS (SELECT 1 FROM public.user_profiles up WHERE up.id = auth.uid() AND up.is_active = true)
+  );
 
 -- Family-Offender Authorization Links
+-- Family users can only view their own links. Staff can view links for their facility.
 DROP POLICY IF EXISTS "family_links_select" ON public.family_offender_links;
 CREATE POLICY "family_links_select" ON public.family_offender_links
   FOR SELECT TO authenticated
   USING (
     family_account_id = public.current_family_account_id()
-    OR (public.current_user_role() = 'ADMIN')
+    OR public.current_user_role() = 'ADMIN'
+    OR (
+      public.current_user_role() = 'WAREHOUSE_SUPERVISOR'
+      AND EXISTS (
+        SELECT 1 FROM public.offenders o
+        WHERE o.id = family_offender_links.offender_id
+          AND o.facility_id = public.current_user_facility()
+      )
+    )
   );
 
-DROP POLICY IF EXISTS "family_links_admin_manage" ON public.family_offender_links;
-CREATE POLICY "family_links_admin_manage" ON public.family_offender_links
-  FOR ALL TO authenticated
-  USING (public.current_user_role() = 'ADMIN')
-  WITH CHECK (public.current_user_role() = 'ADMIN');
+-- Family members can ONLY insert relationship requests with PENDING status (NO SELF-APPROVAL)
+DROP POLICY IF EXISTS "family_links_insert_family" ON public.family_offender_links;
+CREATE POLICY "family_links_insert_family" ON public.family_offender_links
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    public.current_user_role() = 'FAMILY'
+    AND family_account_id = public.current_family_account_id()
+    AND status = 'PENDING'
+  );
+
+-- Institutional staff (ADMIN or WAREHOUSE_SUPERVISOR) can update status to APPROVED or BLOCKED
+DROP POLICY IF EXISTS "family_links_staff_update" ON public.family_offender_links;
+CREATE POLICY "family_links_staff_update" ON public.family_offender_links
+  FOR UPDATE TO authenticated
+  USING (
+    public.current_user_role() IN ('ADMIN', 'WAREHOUSE_SUPERVISOR')
+    AND EXISTS (
+      SELECT 1 FROM public.offenders o
+      WHERE o.id = family_offender_links.offender_id
+        AND (public.current_user_role() = 'ADMIN' OR o.facility_id = public.current_user_facility())
+    )
+  )
+  WITH CHECK (
+    public.current_user_role() IN ('ADMIN', 'WAREHOUSE_SUPERVISOR')
+  );
+
+-- Institutional ADMIN can delete relationship links if required
+DROP POLICY IF EXISTS "family_links_admin_delete" ON public.family_offender_links;
+CREATE POLICY "family_links_admin_delete" ON public.family_offender_links
+  FOR DELETE TO authenticated
+  USING (public.current_user_role() = 'ADMIN');
 
 -- ------------------------------------------------------------------------------
 -- 8.5 PRODUCTS POLICIES (STRICT FACILITY ISOLATION)
@@ -857,7 +963,10 @@ CREATE POLICY "notifications_select" ON public.notifications
   FOR SELECT TO authenticated
   USING (
     (public.current_user_role() = 'INMATE' AND offender_id = public.current_inmate_offender_id())
-    OR user_id = auth.uid()
+    OR (
+      user_id = auth.uid()
+      AND EXISTS (SELECT 1 FROM public.user_profiles up WHERE up.id = auth.uid() AND up.is_active = true)
+    )
   );
 
 DROP POLICY IF EXISTS "notifications_update_read" ON public.notifications;
@@ -865,11 +974,17 @@ CREATE POLICY "notifications_update_read" ON public.notifications
   FOR UPDATE TO authenticated
   USING (
     (public.current_user_role() = 'INMATE' AND offender_id = public.current_inmate_offender_id())
-    OR user_id = auth.uid()
+    OR (
+      user_id = auth.uid()
+      AND EXISTS (SELECT 1 FROM public.user_profiles up WHERE up.id = auth.uid() AND up.is_active = true)
+    )
   )
   WITH CHECK (
     (public.current_user_role() = 'INMATE' AND offender_id = public.current_inmate_offender_id())
-    OR user_id = auth.uid()
+    OR (
+      user_id = auth.uid()
+      AND EXISTS (SELECT 1 FROM public.user_profiles up WHERE up.id = auth.uid() AND up.is_active = true)
+    )
   );
 
 -- ------------------------------------------------------------------------------
@@ -920,7 +1035,8 @@ CREATE POLICY "audit_logs_select_admin" ON public.audit_logs
 -- 9.1 SAFE INMATE PIN VERIFICATION (Defense Against Brute-Force & Hash Exposure)
 CREATE OR REPLACE FUNCTION public.verify_inmate_pin(
   p_offender_id TEXT,
-  p_pin TEXT
+  p_pin TEXT,
+  p_ip_address TEXT DEFAULT NULL
 )
 RETURNS JSONB AS $$
 DECLARE
@@ -933,14 +1049,25 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Offender ID and PIN are required.');
   END IF;
 
-  SELECT id, facility_id, name, pin_hash, failed_pin_attempts, pin_locked_until
+  SELECT id, user_id, facility_id, name, pin_hash, failed_pin_attempts, pin_locked_until
   INTO v_offender
   FROM public.offenders
   WHERE UPPER(id) = UPPER(TRIM(p_offender_id))
   FOR UPDATE;
 
+  -- Uniform response to prevent inmate roster enumeration
   IF NOT FOUND THEN
     RETURN jsonb_build_object('success', false, 'error', 'Invalid Offender ID or PIN.');
+  END IF;
+
+  -- Verify active profile status if linked
+  IF v_offender.user_id IS NOT NULL THEN
+    IF EXISTS (
+      SELECT 1 FROM public.user_profiles
+      WHERE id = v_offender.user_id AND is_active = false
+    ) THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Account is deactivated. Contact unit staff.');
+    END IF;
   END IF;
 
   IF v_offender.pin_locked_until IS NOT NULL AND v_offender.pin_locked_until > now() THEN
@@ -948,7 +1075,7 @@ BEGIN
       action, actor_id, actor_role, facility_id, resource_type, resource_id, metadata
     ) VALUES (
       'LOGIN_ATTEMPT_LOCKED_ACCOUNT', p_offender_id, 'INMATE', v_offender.facility_id, 'OFFENDER', p_offender_id,
-      jsonb_build_object('locked_until', v_offender.pin_locked_until)
+      jsonb_build_object('locked_until', v_offender.pin_locked_until, 'ip_address', p_ip_address)
     );
 
     RETURN jsonb_build_object(
@@ -968,9 +1095,10 @@ BEGIN
     WHERE id = v_offender.id;
 
     INSERT INTO public.audit_logs (
-      action, actor_id, actor_role, facility_id, resource_type, resource_id
+      action, actor_id, actor_role, facility_id, resource_type, resource_id, metadata
     ) VALUES (
-      'INMATE_LOGIN_SUCCESS', v_offender.id, 'INMATE', v_offender.facility_id, 'OFFENDER', v_offender.id
+      'INMATE_LOGIN_SUCCESS', v_offender.id, 'INMATE', v_offender.facility_id, 'OFFENDER', v_offender.id,
+      jsonb_build_object('ip_address', p_ip_address)
     );
 
     RETURN jsonb_build_object(
@@ -991,7 +1119,7 @@ BEGIN
         action, actor_id, actor_role, facility_id, resource_type, resource_id, metadata
       ) VALUES (
         'INMATE_ACCOUNT_LOCKED', v_offender.id, 'INMATE', v_offender.facility_id, 'OFFENDER', v_offender.id,
-        jsonb_build_object('attempts', v_offender.failed_pin_attempts + 1, 'locked_until', now() + v_lockout_interval)
+        jsonb_build_object('attempts', v_offender.failed_pin_attempts + 1, 'locked_until', now() + v_lockout_interval, 'ip_address', p_ip_address)
       );
 
       RETURN jsonb_build_object(
@@ -1009,7 +1137,7 @@ BEGIN
         action, actor_id, actor_role, facility_id, resource_type, resource_id, metadata
       ) VALUES (
         'INMATE_LOGIN_FAILED', v_offender.id, 'INMATE', v_offender.facility_id, 'OFFENDER', v_offender.id,
-        jsonb_build_object('attempts', v_offender.failed_pin_attempts + 1, 'remaining', v_max_attempts - (v_offender.failed_pin_attempts + 1))
+        jsonb_build_object('attempts', v_offender.failed_pin_attempts + 1, 'remaining', v_max_attempts - (v_offender.failed_pin_attempts + 1), 'ip_address', p_ip_address)
       );
 
       RETURN jsonb_build_object(
@@ -1078,7 +1206,8 @@ $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
 CREATE SEQUENCE IF NOT EXISTS public.order_number_seq START WITH 77001;
 
 CREATE OR REPLACE FUNCTION public.place_inmate_order(
-  p_items JSONB
+  p_items JSONB,
+  p_offender_id TEXT DEFAULT NULL
 )
 RETURNS JSONB AS $$
 DECLARE
@@ -1096,9 +1225,22 @@ DECLARE
   v_seq_val BIGINT;
   v_retry_count INTEGER := 0;
 BEGIN
-  v_offender_id := public.current_inmate_offender_id();
-  IF v_offender_id IS NULL OR public.current_user_role() != 'INMATE' THEN
-    RAISE EXCEPTION 'UNAUTHORIZED: Only authenticated inmates may place commissary orders.';
+  -- Dual-Mode Authentication Bridge:
+  -- Mode 1: Backend service_role (invoked by Next.js server route handler with verified signed session cookie)
+  -- Mode 2: Client authenticated role (invoked directly with Supabase Auth JWT)
+  IF auth.role() = 'service_role' OR current_user = 'postgres' THEN
+    IF p_offender_id IS NULL OR TRIM(p_offender_id) = '' THEN
+      RAISE EXCEPTION 'Offender ID is required for backend service_role invocation.';
+    END IF;
+    v_offender_id := UPPER(TRIM(p_offender_id));
+  ELSE
+    IF public.current_user_role() != 'INMATE' THEN
+      RAISE EXCEPTION 'UNAUTHORIZED: Only authenticated active inmates may place commissary orders.';
+    END IF;
+    v_offender_id := public.current_inmate_offender_id();
+    IF v_offender_id IS NULL THEN
+      RAISE EXCEPTION 'UNAUTHORIZED: Active inmate account not found for current session.';
+    END IF;
   END IF;
 
   IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
@@ -1112,6 +1254,16 @@ BEGIN
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Offender account not found.';
+  END IF;
+
+  -- Verify inmate profile is active if linked
+  IF v_offender.user_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.user_profiles
+      WHERE id = v_offender.user_id AND is_active = true
+    ) THEN
+      RAISE EXCEPTION 'ACCOUNT INACTIVE: Inmate account is deactivated.';
+    END IF;
   END IF;
 
   SELECT * INTO v_facility
@@ -1514,15 +1666,15 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ==============================================================================
--- 10. EXPLICIT PERMISSION GRANTS AND REVOCATIONS (LEAST PRIVILEGE)
+-- 10. EXPLICIT PERMISSION GRANTS AND REVOCATIONS (LEAST PRIVILEGE AUDIT)
 -- ==============================================================================
 
--- 10.1 REVOKE ALL DEFAULT PERMISSIONS ON PUBLIC SCHEMA FUNCTIONS
+-- 10.1 FUNCTION PRIVILEGES: REVOKE ALL DEFAULT PERMISSIONS ON PUBLIC SCHEMA
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM anon;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM authenticated;
 
--- 10.2 GRANT MINIMUM EXECUTION RIGHTS ON SPECIFIC FUNCTIONS
+-- 10.2 GRANT MINIMUM EXECUTION RIGHTS ON SPECIFIC APPLICATION FUNCTIONS
 GRANT EXECUTE ON FUNCTION public.current_profile() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.current_user_role() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.current_user_facility() TO authenticated;
@@ -1530,35 +1682,114 @@ GRANT EXECUTE ON FUNCTION public.current_inmate_offender_id() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.current_family_account_id() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_family_authorized_for_offender(UUID, TEXT) TO authenticated;
 
-GRANT EXECUTE ON FUNCTION public.verify_inmate_pin(TEXT, TEXT) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.search_offender_for_family(TEXT, UUID) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.place_inmate_order(JSONB) TO authenticated;
-GRANT USAGE, SELECT ON SEQUENCE public.order_number_seq TO authenticated;
+-- Inmate PIN authentication (callable by anon from kiosk terminal and authenticated sessions)
+GRANT EXECUTE ON FUNCTION public.verify_inmate_pin(TEXT, TEXT, TEXT) TO anon, authenticated;
 
--- PRIVILEGED FUNCTION: Restricted exclusively to service_role
+-- Search offenders (restricted to authenticated family & admin accounts)
+GRANT EXECUTE ON FUNCTION public.search_offender_for_family(TEXT, UUID) TO authenticated;
+
+-- Inmate order placement (dual-mode: authenticated inmates or trusted backend service_role)
+GRANT EXECUTE ON FUNCTION public.place_inmate_order(JSONB, TEXT) TO authenticated, service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.order_number_seq TO authenticated, service_role;
+
+-- PRIVILEGED FUNCTION: Restricted exclusively to service_role (TouchPay webhook/verification)
 GRANT EXECUTE ON FUNCTION public.process_confirmed_touchpay_deposit(TEXT, TEXT, NUMERIC, TEXT) TO service_role;
 REVOKE EXECUTE ON FUNCTION public.process_confirmed_touchpay_deposit(TEXT, TEXT, NUMERIC, TEXT) FROM anon;
 REVOKE EXECUTE ON FUNCTION public.process_confirmed_touchpay_deposit(TEXT, TEXT, NUMERIC, TEXT) FROM authenticated;
 REVOKE EXECUTE ON FUNCTION public.process_confirmed_touchpay_deposit(TEXT, TEXT, NUMERIC, TEXT) FROM PUBLIC;
 
--- 10.3 TABLE-LEVEL PRIVILEGE RESTRICTIONS
-REVOKE ALL ON TABLE public.audit_logs FROM anon, authenticated;
-GRANT SELECT ON TABLE public.audit_logs TO authenticated;
+-- ------------------------------------------------------------------------------
+-- 10.3 EXPLICIT TABLE-LEVEL PRIVILEGE MATRIX ACROSS ALL 16 TABLES
+-- ------------------------------------------------------------------------------
 
-REVOKE ALL ON TABLE public.ledger_entries FROM anon, authenticated;
-GRANT SELECT ON TABLE public.ledger_entries TO authenticated;
+-- Step A: Blanket REVOKE ALL privileges across every table in public schema
+REVOKE ALL ON TABLE public.facilities FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.user_profiles FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.offenders FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.family_accounts FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.family_offender_links FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.products FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.manifests FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.orders FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.order_items FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.order_status_history FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.deposits FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.ledger_entries FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.gift_packages FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.notifications FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.picking_lists FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.audit_logs FROM PUBLIC, anon, authenticated;
 
-REVOKE ALL ON TABLE public.order_status_history FROM anon, authenticated;
+-- Step B: Explicit full access for trusted server-side service_role
+GRANT ALL ON TABLE public.facilities TO service_role;
+GRANT ALL ON TABLE public.user_profiles TO service_role;
+GRANT ALL ON TABLE public.offenders TO service_role;
+GRANT ALL ON TABLE public.family_accounts TO service_role;
+GRANT ALL ON TABLE public.family_offender_links TO service_role;
+GRANT ALL ON TABLE public.products TO service_role;
+GRANT ALL ON TABLE public.manifests TO service_role;
+GRANT ALL ON TABLE public.orders TO service_role;
+GRANT ALL ON TABLE public.order_items TO service_role;
+GRANT ALL ON TABLE public.order_status_history TO service_role;
+GRANT ALL ON TABLE public.deposits TO service_role;
+GRANT ALL ON TABLE public.ledger_entries TO service_role;
+GRANT ALL ON TABLE public.gift_packages TO service_role;
+GRANT ALL ON TABLE public.notifications TO service_role;
+GRANT ALL ON TABLE public.picking_lists TO service_role;
+GRANT ALL ON TABLE public.audit_logs TO service_role;
+
+-- Step C: Explicit least-privilege grants to authenticated role (governed by RLS)
+-- 1. facilities: SELECT all active; UPDATE restricted to ADMIN via RLS
+GRANT SELECT, UPDATE ON TABLE public.facilities TO authenticated;
+
+-- 2. user_profiles: SELECT, INSERT; UPDATE strictly restricted to name & email columns
+GRANT SELECT, INSERT ON TABLE public.user_profiles TO authenticated;
+GRANT UPDATE (name, email) ON public.user_profiles TO authenticated;
+
+-- 3. offenders: SELECT; UPDATE restricted to staff; pin_hash and balances strictly REVOKED
+GRANT SELECT ON TABLE public.offenders TO authenticated;
+GRANT UPDATE (unit, housing, weekly_limit) ON public.offenders TO authenticated;
+REVOKE SELECT (pin_hash) ON public.offenders FROM authenticated;
+REVOKE UPDATE (pin_hash, balance, current_weekly_spent) ON public.offenders FROM authenticated;
+
+-- 4. family_accounts: SELECT, INSERT, UPDATE (scoped to own account via RLS)
+GRANT SELECT, INSERT, UPDATE ON TABLE public.family_accounts TO authenticated;
+
+-- 5. family_offender_links: SELECT, INSERT (for link requests), UPDATE (staff approval/blocking)
+GRANT SELECT, INSERT, UPDATE ON TABLE public.family_offender_links TO authenticated;
+
+-- 6. products: SELECT, INSERT, UPDATE, DELETE (warehouse/staff catalog management)
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.products TO authenticated;
+
+-- 7. manifests: SELECT, INSERT, UPDATE (warehouse operations)
+GRANT SELECT, INSERT, UPDATE ON TABLE public.manifests TO authenticated;
+
+-- 8. orders: SELECT, UPDATE (order fulfillment by warehouse)
+GRANT SELECT ON TABLE public.orders TO authenticated;
+GRANT UPDATE (status, tracking_barcode) ON public.orders TO authenticated;
+
+-- 9. order_items: SELECT only (created atomically via place_inmate_order RPC)
+GRANT SELECT ON TABLE public.order_items TO authenticated;
+
+-- 10. order_status_history: SELECT only (strictly immutable audit history)
 GRANT SELECT ON TABLE public.order_status_history TO authenticated;
 
-REVOKE UPDATE, DELETE ON public.notifications FROM anon;
-REVOKE UPDATE, DELETE ON public.notifications FROM authenticated;
--- Allow authenticated users to update ONLY the 'read' status column
+-- 11. deposits: SELECT, INSERT (pending intents); UPDATE strictly REVOKED from clients
+GRANT SELECT, INSERT ON TABLE public.deposits TO authenticated;
+REVOKE UPDATE ON public.deposits FROM authenticated;
+
+-- 12. ledger_entries: SELECT only (strictly immutable double-entry ledger)
+GRANT SELECT ON TABLE public.ledger_entries TO authenticated;
+
+-- 13. gift_packages: SELECT, INSERT, UPDATE (family submission & staff review)
+GRANT SELECT, INSERT, UPDATE ON TABLE public.gift_packages TO authenticated;
+
+-- 14. notifications: SELECT; UPDATE strictly on 'read' column
+GRANT SELECT ON TABLE public.notifications TO authenticated;
 GRANT UPDATE (read) ON public.notifications TO authenticated;
 
--- 10.4 CRITICAL COLUMN-LEVEL REVOCATIONS
-REVOKE SELECT (pin_hash) ON public.offenders FROM anon, authenticated;
-REVOKE UPDATE (pin_hash) ON public.offenders FROM anon, authenticated;
-REVOKE UPDATE (balance, current_weekly_spent) ON public.offenders FROM anon, authenticated;
-REVOKE UPDATE (role, facility_id) ON public.user_profiles FROM anon, authenticated;
-REVOKE UPDATE (status, completed_at, amount, total_paid) ON public.deposits FROM anon, authenticated;
+-- 15. picking_lists: SELECT, UPDATE (warehouse picking operations)
+GRANT SELECT, UPDATE ON TABLE public.picking_lists TO authenticated;
+
+-- 16. audit_logs: SELECT only (strictly immutable audit records)
+GRANT SELECT ON TABLE public.audit_logs TO authenticated;

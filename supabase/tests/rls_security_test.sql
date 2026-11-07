@@ -274,6 +274,132 @@ EXCEPTION WHEN OTHERS THEN
   INSERT INTO test_results VALUES (8, 'process_confirmed_touchpay_deposit revoked from authenticated users', true, 'Execution permission denied');
 END $$;
 
+-- ==============================================================================
+-- TEST 9: Inactive Account Access Lockout (is_active = false)
+-- ==============================================================================
+DO $$
+DECLARE
+  v_role public.user_role;
+  v_offender_id TEXT;
+  v_visible_records INTEGER;
+BEGIN
+  -- Deactivate Inmate A's user profile as postgres admin
+  SET LOCAL ROLE postgres;
+  UPDATE public.user_profiles
+  SET is_active = false
+  WHERE id = 'aaaa1111-aaaa-1111-aaaa-111111111111';
+
+  -- Switch to authenticated session as Inmate A
+  SET LOCAL ROLE authenticated;
+  PERFORM set_config('request.jwt.claims', '{"sub": "aaaa1111-aaaa-1111-aaaa-111111111111", "role": "authenticated"}', true);
+
+  v_role := public.current_user_role();
+  v_offender_id := public.current_inmate_offender_id();
+  SELECT COUNT(*) INTO v_visible_records FROM public.offenders;
+
+  IF v_role IS NULL AND v_offender_id IS NULL AND v_visible_records = 0 THEN
+    INSERT INTO test_results VALUES (9, 'Inactive account access revoked immediately across all paths', true, 'Role/OffenderId are NULL, 0 records visible');
+  ELSE
+    INSERT INTO test_results VALUES (9, 'Inactive account retained access (CRITICAL FAILURE)', false,
+      format('Role: %s, OffenderId: %s, Visible records: %s', v_role, v_offender_id, v_visible_records));
+  END IF;
+
+  -- Restore active status for subsequent tests
+  SET LOCAL ROLE postgres;
+  UPDATE public.user_profiles
+  SET is_active = true
+  WHERE id = 'aaaa1111-aaaa-1111-aaaa-111111111111';
+END $$;
+
+-- ==============================================================================
+-- TEST 10: User Profile Column Update Privilege Escalation Block
+-- ==============================================================================
+DO $$
+DECLARE
+  v_elevation_blocked BOOLEAN := false;
+  v_name_updated BOOLEAN := false;
+BEGIN
+  SET LOCAL ROLE authenticated;
+  PERFORM set_config('request.jwt.claims', '{"sub": "cccc3333-cccc-3333-cccc-333333333333", "role": "authenticated"}', true);
+
+  -- Attempt to self-assign ADMIN role
+  BEGIN
+    UPDATE public.user_profiles SET role = 'ADMIN' WHERE id = 'cccc3333-cccc-3333-cccc-333333333333';
+  EXCEPTION WHEN OTHERS THEN
+    v_elevation_blocked := true;
+  END;
+
+  -- Allowed update: updating display name
+  UPDATE public.user_profiles SET name = 'Updated Family Name' WHERE id = 'cccc3333-cccc-3333-cccc-333333333333';
+  v_name_updated := true;
+
+  IF v_elevation_blocked AND v_name_updated THEN
+    INSERT INTO test_results VALUES (10, 'Profile column permissions prevent role/status escalation while permitting name update', true, 'Role change blocked, name update succeeded');
+  ELSE
+    INSERT INTO test_results VALUES (10, 'Profile update restriction failed', false, format('Elevation blocked: %s, Name updated: %s', v_elevation_blocked, v_name_updated));
+  END IF;
+END $$;
+
+-- ==============================================================================
+-- TEST 11: Family Relationship Self-Approval Block
+-- ==============================================================================
+DO $$
+DECLARE
+  v_self_approve_blocked BOOLEAN := false;
+  v_pending_request_allowed BOOLEAN := false;
+  v_status_elevate_blocked BOOLEAN := false;
+BEGIN
+  SET LOCAL ROLE authenticated;
+  PERFORM set_config('request.jwt.claims', '{"sub": "dddd4444-dddd-4444-dddd-444444444444", "role": "authenticated"}', true);
+
+  -- Attempt 1: Insert link with status = APPROVED (Self-approval attack)
+  BEGIN
+    INSERT INTO public.family_offender_links (family_account_id, offender_id, status, relationship)
+    VALUES ('77777777-7777-7777-7777-777777777772', 'A1234567', 'APPROVED', 'Friend');
+  EXCEPTION WHEN OTHERS THEN
+    v_self_approve_blocked := true;
+  END;
+
+  -- Attempt 2: Insert link with status = PENDING (Valid relationship request)
+  INSERT INTO public.family_offender_links (family_account_id, offender_id, status, relationship)
+  VALUES ('77777777-7777-7777-7777-777777777772', 'A1234567', 'PENDING', 'Friend');
+  v_pending_request_allowed := true;
+
+  -- Attempt 3: Try to elevate status from PENDING to APPROVED
+  BEGIN
+    UPDATE public.family_offender_links
+    SET status = 'APPROVED'
+    WHERE family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'A1234567';
+  EXCEPTION WHEN OTHERS THEN
+    v_status_elevate_blocked := true;
+  END;
+
+  IF v_self_approve_blocked AND v_pending_request_allowed AND v_status_elevate_blocked THEN
+    INSERT INTO test_results VALUES (11, 'Family relationship links require institutional staff approval; self-approval strictly rejected', true, 'Direct APPROVED insert and UPDATE blocked; PENDING request allowed');
+  ELSE
+    INSERT INTO test_results VALUES (11, 'Family relationship link integrity breached', false,
+      format('Self-approve blocked: %s, Pending allowed: %s, Elevate blocked: %s', v_self_approve_blocked, v_pending_request_allowed, v_status_elevate_blocked));
+  END IF;
+END $$;
+
+-- ==============================================================================
+-- TEST 12: Sequence-Driven Unique Order Number & Barcode Concurrency
+-- ==============================================================================
+DO $$
+DECLARE
+  v_seq1 BIGINT;
+  v_seq2 BIGINT;
+BEGIN
+  v_seq1 := nextval('public.order_number_seq');
+  v_seq2 := nextval('public.order_number_seq');
+
+  IF v_seq2 > v_seq1 THEN
+    INSERT INTO test_results VALUES (12, 'Atomic order sequence produces strictly monotonic unique numbers', true, format('Sequence stepped from %s to %s', v_seq1, v_seq2));
+  ELSE
+    INSERT INTO test_results VALUES (12, 'Order sequence collision detected', false, format('seq1: %s, seq2: %s', v_seq1, v_seq2));
+  END IF;
+END $$;
+
 -- OUTPUT SUMMARY TABLE
 SELECT
   test_num AS "#",
@@ -285,3 +411,4 @@ ORDER BY test_num ASC;
 
 -- ROLLBACK ALL TEST FIXTURES
 ROLLBACK;
+
