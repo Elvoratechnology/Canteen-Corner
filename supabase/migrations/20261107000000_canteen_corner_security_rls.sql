@@ -420,7 +420,7 @@ BEGIN
   END IF;
 
   IF auth.role() = 'authenticated' AND public.current_user_role() != 'ADMIN' THEN
-    IF v_order_facility != public.current_user_facility() THEN
+    IF public.current_user_facility() IS NULL OR v_order_facility IS DISTINCT FROM public.current_user_facility() THEN
       RAISE EXCEPTION 'SECURITY VIOLATION: Cannot assign or modify picking lists for orders outside your assigned facility.';
     END IF;
   END IF;
