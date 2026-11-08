@@ -21,10 +21,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { event, providerRef, idempotencyKey } = verification.payload;
+    const { event, providerRef, idempotencyKey, amount } = verification.payload;
 
     if (event === 'payment.succeeded') {
-      const result = await provider.processPaymentConfirmation(providerRef, idempotencyKey);
+      const result = await provider.processPaymentConfirmation(providerRef, idempotencyKey, amount);
 
       await logAuditAction({
         action: 'TOUCHPAY_WEBHOOK_PROCESSED',

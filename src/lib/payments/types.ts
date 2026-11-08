@@ -38,7 +38,11 @@ export interface WebhookVerificationResult {
 export interface IPaymentProvider {
   createPaymentIntent(req: PaymentIntentRequest): Promise<PaymentIntentResponse>;
   verifyWebhook(headers: Record<string, string>, rawBody: string): Promise<WebhookVerificationResult>;
-  processPaymentConfirmation(providerRef: string, idempotencyKey: string): Promise<{ success: boolean; message: string }>;
+  processPaymentConfirmation(
+    providerRef: string,
+    idempotencyKey: string,
+    verifiedAmount?: number
+  ): Promise<{ success: boolean; message: string }>;
   getPaymentStatus(providerRef: string): Promise<'PENDING' | 'SUCCEEDED' | 'FAILED'>;
 }
 

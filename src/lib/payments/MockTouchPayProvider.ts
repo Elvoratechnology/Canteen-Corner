@@ -85,17 +85,32 @@ export class MockTouchPayProvider implements IPaymentProvider {
         .update(rawBody)
         .digest('hex');
 
+      let isSignatureValid = false;
+      try {
+        const sigBuf = Buffer.from(signature, 'utf8');
+        const expBuf = Buffer.from(expectedSig, 'utf8');
+        if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
+          isSignatureValid = true;
+        }
+      } catch {
+        isSignatureValid = false;
+      }
+
       const isTestAllowed = process.env.NODE_ENV !== 'production';
-      const isSignatureValid =
-        signature === expectedSig ||
-        (isTestAllowed && (signature.startsWith('test_') || signature === this.webhookSecret));
+      if (
+        !isSignatureValid &&
+        isTestAllowed &&
+        (signature.startsWith('test_') || signature === this.webhookSecret)
+      ) {
+        isSignatureValid = true;
+      }
 
       if (!isSignatureValid) {
         return { valid: false, error: 'Invalid HMAC webhook signature' };
       }
 
       const payload = JSON.parse(rawBody) as TouchPayWebhookPayload;
-      if (!payload.providerRef || !payload.idempotencyKey || !payload.amount) {
+      if (!payload.providerRef || !payload.idempotencyKey || typeof payload.amount !== 'number' || payload.amount <= 0) {
         return { valid: false, error: 'Malformed webhook payload' };
       }
 
@@ -107,10 +122,16 @@ export class MockTouchPayProvider implements IPaymentProvider {
 
   async processPaymentConfirmation(
     providerRef: string,
-    idempotencyKey: string
+    idempotencyKey: string,
+    verifiedAmount?: number
   ): Promise<{ success: boolean; message: string }> {
     // Run database transaction to idempotently transition Deposit state and credit Offender
     return await prisma.$transaction(async (tx) => {
+      // Set transaction authorization config in PostgreSQL if RLS / balance trigger is active
+      if (process.env.DATABASE_URL?.startsWith('postgres')) {
+        await tx.$executeRawUnsafe(`SELECT set_config('canteen.authorized_transaction', 'true', true);`).catch(() => {});
+      }
+
       const deposit = await tx.deposit.findUnique({
         where: { providerRef },
         include: { offender: true, familyAccount: { include: { user: true } } },
@@ -129,7 +150,38 @@ export class MockTouchPayProvider implements IPaymentProvider {
       }
 
       if (deposit.status === 'FAILED') {
-        throw new Error('Cannot credit a failed deposit.');
+        return {
+          success: false,
+          message: 'Deposit has failed or was marked invalid.',
+        };
+      }
+
+      // Enforce Verified Amount Integrity if verifiedAmount is supplied
+      if (verifiedAmount !== undefined && Math.abs(deposit.amount - verifiedAmount) > 0.001) {
+        await tx.deposit.update({
+          where: { id: deposit.id },
+          data: { status: 'FAILED' },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            action: 'TOUCHPAY_AMOUNT_MISMATCH_FRAUD',
+            actorId: 'TOUCHPAY_GATEWAY',
+            actorRole: 'SYSTEM',
+            resourceType: 'DEPOSIT',
+            resourceId: providerRef,
+            metadata: JSON.stringify({
+              recordedAmount: deposit.amount,
+              verifiedAmount,
+              reason: 'Amount mismatch between recorded deposit intent and verified gateway payload',
+            }),
+          },
+        });
+
+        return {
+          success: false,
+          message: `SECURITY ALERT: Verified amount ($${verifiedAmount.toFixed(2)}) does not match deposit intent ($${deposit.amount.toFixed(2)}). Deposit marked FAILED.`,
+        };
       }
 
       const offender = deposit.offender;

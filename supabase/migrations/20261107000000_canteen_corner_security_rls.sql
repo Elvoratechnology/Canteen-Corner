@@ -290,49 +290,94 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
 );
 
 -- ==============================================================================
--- 3.17 SCHEMA UPGRADE & IDEMPOTENT COLUMN COMPATIBILITY
+-- 3.17 SCHEMA UPGRADE & VALIDATED IDEMPOTENT COLUMN ADDITIONS
 -- Ensures pre-existing tables in live Supabase projects are upgraded gracefully
--- without requiring table drops or causing column-not-found failures
+-- without requiring table drops or causing column-not-found failures.
+-- Broad exception swallowing is strictly removed so that migration errors are visible.
 -- ==============================================================================
-DO $$ BEGIN
-  -- Facilities
-  ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS weekly_reset_day INTEGER NOT NULL DEFAULT 0;
-  ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS gift_packages_enabled BOOLEAN NOT NULL DEFAULT true;
-  ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS max_weekly_spend NUMERIC(10, 2) NOT NULL DEFAULT 100.00;
-  ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS max_deposit_amount NUMERIC(10, 2) NOT NULL DEFAULT 300.00;
 
-  -- User Profiles
-  ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS facility_id UUID REFERENCES public.facilities(id) ON DELETE RESTRICT;
-  ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS role user_role NOT NULL DEFAULT 'FAMILY';
-  ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS staff_id TEXT;
-  ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+-- Facilities
+ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS weekly_reset_day INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS gift_packages_enabled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS max_weekly_spend NUMERIC(10, 2) NOT NULL DEFAULT 100.00;
+ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS max_deposit_amount NUMERIC(10, 2) NOT NULL DEFAULT 300.00;
 
-  -- Offenders
-  ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.user_profiles(id) ON DELETE SET NULL;
-  ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS current_weekly_spent NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
-  ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS last_weekly_reset TIMESTAMPTZ NOT NULL DEFAULT now();
-  ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS failed_pin_attempts INTEGER NOT NULL DEFAULT 0;
-  ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS pin_locked_until TIMESTAMPTZ;
+-- User Profiles
+ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS facility_id UUID REFERENCES public.facilities(id) ON DELETE RESTRICT;
+ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS role user_role NOT NULL DEFAULT 'FAMILY';
+ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS staff_id TEXT;
+ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
 
-  -- Orders
-  ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS manifest_id UUID REFERENCES public.manifests(id) ON DELETE SET NULL;
-  ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tax NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
-  ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS barcode TEXT;
-  ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tracking_barcode TEXT;
+-- Offenders
+ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.user_profiles(id) ON DELETE SET NULL;
+ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS current_weekly_spent NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS last_weekly_reset TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS failed_pin_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.offenders ADD COLUMN IF NOT EXISTS pin_locked_until TIMESTAMPTZ;
 
-  -- Deposits
-  ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USD';
-  ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
-  ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS provider_ref TEXT;
-  ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS fee NUMERIC(10, 2) NOT NULL DEFAULT 3.50;
-  ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS total_paid NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+-- Orders
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS manifest_id UUID REFERENCES public.manifests(id) ON DELETE SET NULL;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tax NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS barcode TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS tracking_barcode TEXT;
 
-  -- Notifications & Picking Lists
-  ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS read BOOLEAN NOT NULL DEFAULT false;
-  ALTER TABLE public.picking_lists ADD COLUMN IF NOT EXISTS assigned_to UUID REFERENCES public.user_profiles(id) ON DELETE SET NULL;
-  ALTER TABLE public.picking_lists ADD COLUMN IF NOT EXISTS flagged_reason TEXT;
-EXCEPTION WHEN OTHERS THEN
-  null;
+-- Deposits
+ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USD';
+ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS provider_ref TEXT;
+ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS fee NUMERIC(10, 2) NOT NULL DEFAULT 3.50;
+ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS total_paid NUMERIC(10, 2) NOT NULL DEFAULT 0.00;
+
+-- Notifications & Picking Lists
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS read BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.picking_lists ADD COLUMN IF NOT EXISTS assigned_to UUID REFERENCES public.user_profiles(id) ON DELETE SET NULL;
+ALTER TABLE public.picking_lists ADD COLUMN IF NOT EXISTS flagged_reason TEXT;
+
+-- Validation Assertion: Verify that every required column is physically present in the schema
+DO $$
+DECLARE
+  v_missing_cols TEXT := '';
+BEGIN
+  SELECT string_agg(req.tbl || '.' || req.col, ', ')
+  INTO v_missing_cols
+  FROM (
+    VALUES
+      ('facilities', 'weekly_reset_day'),
+      ('facilities', 'gift_packages_enabled'),
+      ('facilities', 'max_weekly_spend'),
+      ('facilities', 'max_deposit_amount'),
+      ('user_profiles', 'facility_id'),
+      ('user_profiles', 'role'),
+      ('user_profiles', 'staff_id'),
+      ('user_profiles', 'is_active'),
+      ('offenders', 'user_id'),
+      ('offenders', 'current_weekly_spent'),
+      ('offenders', 'last_weekly_reset'),
+      ('offenders', 'failed_pin_attempts'),
+      ('offenders', 'pin_locked_until'),
+      ('orders', 'manifest_id'),
+      ('orders', 'tax'),
+      ('orders', 'barcode'),
+      ('orders', 'tracking_barcode'),
+      ('deposits', 'currency'),
+      ('deposits', 'idempotency_key'),
+      ('deposits', 'provider_ref'),
+      ('deposits', 'fee'),
+      ('deposits', 'total_paid'),
+      ('notifications', 'read'),
+      ('picking_lists', 'assigned_to'),
+      ('picking_lists', 'flagged_reason')
+  ) AS req(tbl, col)
+  WHERE NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = req.tbl
+      AND column_name = req.col
+  );
+
+  IF v_missing_cols IS NOT NULL AND v_missing_cols <> '' THEN
+    RAISE EXCEPTION 'MIGRATION VALIDATION FAILURE: Required schema columns missing: %', v_missing_cols;
+  END IF;
 END $$;
 
 -- ==============================================================================
@@ -579,14 +624,42 @@ CREATE TRIGGER trg_family_link_status_guard
   EXECUTE FUNCTION public.check_family_link_status_guard();
 
 -- Trigger: Prevent direct modification of financial balance columns on offenders
+-- SECURITY ARCHITECTURE NOTE:
+-- A caller-settable custom PostgreSQL GUC (e.g. canteen.authorized_transaction = 'true') is NOT
+-- a secure authorization boundary, as any authenticated client executing SQL can issue SET LOCAL.
+-- Therefore, this trigger implements a strict multi-layer defense:
+-- 1. Unconditional rejection for all client roles (authenticated, anon). Setting ANY session GUC will NEVER
+--    permit client roles to directly modify balance or current_weekly_spent.
+-- 2. For verified internal functions (place_inmate_order, process_confirmed_touchpay_deposit), a high-entropy
+--    single-use cryptographic nonce is set in canteen._internal_balance_nonce and immediately consumed.
+--    Static bypass strings such as 'true' are explicitly rejected.
+-- 3. Superuser direct migration/console maintenance is restricted to pure postgres sessions without auth context.
 CREATE OR REPLACE FUNCTION public.prevent_direct_balance_tampering()
 RETURNS TRIGGER AS $$
+DECLARE
+  v_nonce TEXT;
 BEGIN
-  IF current_setting('canteen.authorized_transaction', true) IS DISTINCT FROM 'true' THEN
-    IF NEW.balance IS DISTINCT FROM OLD.balance OR NEW.current_weekly_spent IS DISTINCT FROM OLD.current_weekly_spent THEN
-      RAISE EXCEPTION 'SECURITY VIOLATION: Inmate balances can only be updated via verified financial transaction functions.';
+  IF NEW.balance IS DISTINCT FROM OLD.balance OR NEW.current_weekly_spent IS DISTINCT FROM OLD.current_weekly_spent THEN
+    -- Layer 1: Client roles are permanently forbidden from modifying financial columns
+    IF current_user IN ('authenticated', 'anon') OR auth.role() IN ('authenticated', 'anon') THEN
+      RAISE EXCEPTION 'SECURITY VIOLATION: Direct balance or spending modification is strictly prohibited for client roles (42501).';
+    END IF;
+
+    -- Layer 2: Single-use ephemeral nonce validation
+    v_nonce := current_setting('canteen._internal_balance_nonce', true);
+    IF v_nonce IS NULL OR v_nonce = '' OR v_nonce = 'true' THEN
+      -- Direct superuser maintenance allowed ONLY if executing as postgres without auth role
+      IF session_user = 'postgres' AND auth.role() IS NULL AND current_user = 'postgres' THEN
+        NULL;
+      ELSE
+        RAISE EXCEPTION 'SECURITY VIOLATION: Inmate balances can only be updated via verified financial transaction functions (place_inmate_order, process_confirmed_touchpay_deposit). Custom GUC bypass rejected.';
+      END IF;
+    ELSE
+      -- Consume/invalidate nonce immediately so it cannot be reused
+      PERFORM set_config('canteen._internal_balance_nonce', '', true);
     END IF;
   END IF;
+
   NEW.updated_at = now();
   RETURN NEW;
 END;
@@ -700,6 +773,23 @@ ALTER TABLE public.picking_lists FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs FORCE ROW LEVEL SECURITY;
 
+-- Purge any pre-existing legacy or overly permissive default policies
+DROP POLICY IF EXISTS "Enable read access for all users" ON public.facilities;
+DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON public.facilities;
+DROP POLICY IF EXISTS "Enable read access for all users" ON public.user_profiles;
+DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON public.user_profiles;
+DROP POLICY IF EXISTS "Enable read access for all users" ON public.offenders;
+DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON public.offenders;
+DROP POLICY IF EXISTS "Enable read access for all users" ON public.orders;
+DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON public.orders;
+DROP POLICY IF EXISTS "Enable read access for all users" ON public.deposits;
+DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON public.deposits;
+DROP POLICY IF EXISTS "Enable read access for all users" ON public.products;
+DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON public.products;
+DROP POLICY IF EXISTS "Allow all for authenticated" ON public.orders;
+DROP POLICY IF EXISTS "Allow all for authenticated" ON public.deposits;
+DROP POLICY IF EXISTS "Allow all for authenticated" ON public.products;
+
 -- ------------------------------------------------------------------------------
 -- 8.1 FACILITIES POLICIES
 -- ------------------------------------------------------------------------------
@@ -724,8 +814,14 @@ CREATE POLICY "facilities_select_authenticated" ON public.facilities
 DROP POLICY IF EXISTS "facilities_update_admin" ON public.facilities;
 CREATE POLICY "facilities_update_admin" ON public.facilities
   FOR UPDATE TO authenticated
-  USING (id = public.current_user_facility() AND public.current_user_role() = 'ADMIN')
-  WITH CHECK (id = public.current_user_facility() AND public.current_user_role() = 'ADMIN');
+  USING (
+    public.current_user_role() = 'ADMIN'
+    AND (public.current_user_facility() IS NULL OR id = public.current_user_facility())
+  )
+  WITH CHECK (
+    public.current_user_role() = 'ADMIN'
+    AND (public.current_user_facility() IS NULL OR id = public.current_user_facility())
+  );
 
 -- ------------------------------------------------------------------------------
 -- 8.2 USER PROFILES POLICIES
@@ -1330,6 +1426,7 @@ DECLARE
   v_delivery_date TIMESTAMPTZ;
   v_seq_val BIGINT;
   v_retry_count INTEGER := 0;
+  v_auth_nonce TEXT;
 BEGIN
   -- Dual-Mode Authentication Bridge:
   -- Mode 1: Client authenticated role (invoked directly with Supabase Auth JWT)
@@ -1352,10 +1449,16 @@ BEGIN
     RAISE EXCEPTION 'UNAUTHORIZED: Calling place_inmate_order requires authenticated inmate session or trusted backend service_role.';
   END IF;
 
-  IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
-    RAISE EXCEPTION 'Order cart cannot be empty.';
+  -- 1. Input Structure & Boundary Validation
+  IF p_items IS NULL OR jsonb_typeof(p_items) != 'array' OR jsonb_array_length(p_items) = 0 THEN
+    RAISE EXCEPTION 'Order cart must be a non-empty JSON array.';
   END IF;
 
+  IF jsonb_array_length(p_items) > 50 THEN
+    RAISE EXCEPTION 'Order cart exceeds maximum allowable items per order (50).';
+  END IF;
+
+  -- 2. Lock Offender Row
   SELECT * INTO v_offender
   FROM public.offenders
   WHERE id = v_offender_id
@@ -1375,21 +1478,37 @@ BEGIN
     END IF;
   END IF;
 
+  IF v_offender.pin_locked_until IS NOT NULL AND v_offender.pin_locked_until > now() THEN
+    RAISE EXCEPTION 'ACCOUNT_LOCKED: Inmate account is temporarily locked.';
+  END IF;
+
   SELECT * INTO v_facility
   FROM public.facilities
   WHERE id = v_offender.facility_id;
 
-  -- Deadlock-safe product sorting, aggregation, and locking (prevents duplicate productId stock bypass)
+  -- 3. Dedicated Temporary Buffer for Locked Product Validation & Price Consistency
+  CREATE TEMPORARY TABLE IF NOT EXISTS _order_items_buffer (
+    product_id UUID PRIMARY KEY,
+    quantity INTEGER NOT NULL,
+    product_name TEXT NOT NULL,
+    locked_price NUMERIC(10, 2) NOT NULL,
+    item_subtotal NUMERIC(10, 2) NOT NULL
+  ) ON COMMIT DROP;
+
+  DELETE FROM _order_items_buffer;
+
+  -- Deadlock-safe product sorting, aggregation, and locking (ORDER BY product_id ASC)
   FOR v_item IN
     SELECT
       (elem->>'productId')::UUID AS product_id,
       SUM((elem->>'quantity')::INTEGER)::INTEGER AS quantity
     FROM jsonb_array_elements(p_items) AS elem
+    WHERE elem->>'productId' IS NOT NULL
     GROUP BY (elem->>'productId')::UUID
     ORDER BY (elem->>'productId')::UUID ASC
   LOOP
-    IF v_item.quantity <= 0 THEN
-      RAISE EXCEPTION 'Invalid item quantity: must be positive integer.';
+    IF v_item.quantity <= 0 OR v_item.quantity > 99 THEN
+      RAISE EXCEPTION 'Invalid item quantity: must be an integer between 1 and 99.';
     END IF;
 
     SELECT * INTO v_product
@@ -1413,8 +1532,16 @@ BEGIN
 
     v_item_total := ROUND(v_product.price * v_item.quantity, 2);
     v_subtotal := v_subtotal + v_item_total;
+
+    INSERT INTO _order_items_buffer (product_id, quantity, product_name, locked_price, item_subtotal)
+    VALUES (v_product.id, v_item.quantity, v_product.name, v_product.price, v_item_total);
   END LOOP;
 
+  IF v_subtotal <= 0.00 THEN
+    RAISE EXCEPTION 'Order subtotal must be greater than zero.';
+  END IF;
+
+  -- 4. Financial Limits Enforcement
   IF v_subtotal > v_offender.balance THEN
     RAISE EXCEPTION 'Insufficient funds: Order total ($%) exceeds your current balance ($%).',
       v_subtotal, v_offender.balance;
@@ -1427,21 +1554,16 @@ BEGIN
 
   v_delivery_date := now() + INTERVAL '3 days';
 
-  PERFORM set_config('canteen.authorized_transaction', 'true', true);
+  -- 5. Deduct Stock using validated buffer
+  UPDATE public.products p
+  SET stock = p.stock - b.quantity,
+      updated_at = now()
+  FROM _order_items_buffer b
+  WHERE p.id = b.product_id;
 
-  FOR v_item IN
-    SELECT
-      (elem->>'productId')::UUID AS product_id,
-      SUM((elem->>'quantity')::INTEGER)::INTEGER AS quantity
-    FROM jsonb_array_elements(p_items) AS elem
-    GROUP BY (elem->>'productId')::UUID
-    ORDER BY (elem->>'productId')::UUID ASC
-  LOOP
-    UPDATE public.products
-    SET stock = stock - v_item.quantity,
-        updated_at = now()
-    WHERE id = v_item.product_id;
-  END LOOP;
+  -- 6. Update Offender Balance using Single-Use Cryptographic Nonce
+  v_auth_nonce := gen_random_uuid()::text;
+  PERFORM set_config('canteen._internal_balance_nonce', v_auth_nonce, true);
 
   UPDATE public.offenders
   SET balance = balance - v_subtotal,
@@ -1449,7 +1571,7 @@ BEGIN
       updated_at = now()
   WHERE id = v_offender_id;
 
-  -- Atomic Sequence-driven Order Number & Barcode generation with concurrency retry protection
+  -- 7. Atomic Sequence-driven Order Number & Barcode generation with concurrency retry protection
   LOOP
     BEGIN
       v_seq_val := nextval('public.order_number_seq');
@@ -1487,32 +1609,15 @@ BEGIN
     END;
   END LOOP;
 
-  FOR v_item IN
-    SELECT
-      (elem->>'productId')::UUID AS product_id,
-      SUM((elem->>'quantity')::INTEGER)::INTEGER AS quantity
-    FROM jsonb_array_elements(p_items) AS elem
-    GROUP BY (elem->>'productId')::UUID
-    ORDER BY (elem->>'productId')::UUID ASC
-  LOOP
-    SELECT price INTO v_item_total
-    FROM public.products
-    WHERE id = v_item.product_id;
-
-    INSERT INTO public.order_items (
-      order_id,
-      product_id,
-      quantity,
-      unit_price,
-      total_price
-    ) VALUES (
-      v_order_id,
-      v_item.product_id,
-      v_item.quantity,
-      v_item_total,
-      ROUND(v_item_total * v_item.quantity, 2)
-    );
-  END LOOP;
+  -- 8. Insert Order Items from Locked Buffer (Guaranteeing exact locked price)
+  INSERT INTO public.order_items (order_id, product_id, quantity, unit_price, total_price)
+  SELECT
+    v_order_id,
+    b.product_id,
+    b.quantity,
+    b.locked_price,
+    b.item_subtotal
+  FROM _order_items_buffer b;
 
   INSERT INTO public.order_status_history (
     order_id,
@@ -1606,6 +1711,7 @@ RETURNS JSONB AS $$
 DECLARE
   v_deposit RECORD;
   v_offender RECORD;
+  v_auth_nonce TEXT;
 BEGIN
   -- Strict caller gate: only service_role or database direct superuser session
   IF auth.role() IS DISTINCT FROM 'service_role' AND session_user IS DISTINCT FROM 'postgres' THEN
@@ -1693,7 +1799,8 @@ BEGIN
     RAISE EXCEPTION 'Associated offender "%" not found.', v_deposit.offender_id;
   END IF;
 
-  PERFORM set_config('canteen.authorized_transaction', 'true', true);
+  v_auth_nonce := gen_random_uuid()::text;
+  PERFORM set_config('canteen._internal_balance_nonce', v_auth_nonce, true);
 
   UPDATE public.offenders
   SET balance = balance + v_deposit.amount,

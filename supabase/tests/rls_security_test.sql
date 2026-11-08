@@ -128,9 +128,19 @@ BEGIN
     WHERE id IN (v_fac1_id, v_fac2_id)
     AND (
       name IS DISTINCT FROM CASE WHEN id = v_fac1_id THEN 'Cumberland Regional Facility (Test)' ELSE 'Westside Correctional Center (Test)' END
+      OR weekly_reset_day IS DISTINCT FROM CASE WHEN id = v_fac1_id THEN 0 ELSE 1 END
+      OR max_weekly_spend IS DISTINCT FROM 100.00
     )
   ) THEN
-    RAISE EXCEPTION 'SAFETY HALT: Real facility records match test facility UUIDs.';
+    RAISE EXCEPTION 'SAFETY HALT: Existing facility record matches test UUIDs but does not match complete expected test fixture identity (name, weekly_reset_day, max_weekly_spend).';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.facilities
+    WHERE name IN ('Cumberland Regional Facility (Test)', 'Westside Correctional Center (Test)')
+    AND id NOT IN (v_fac1_id, v_fac2_id)
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Facility name collision detected with different facility ID.';
   END IF;
 
   IF EXISTS (
@@ -185,12 +195,13 @@ BEGIN
     SELECT 1 FROM public.orders
     WHERE id IN (v_order1_id, v_order2_id)
     AND (
-      order_number IS DISTINCT FROM CASE WHEN id = v_order1_id THEN '#CC-TEST1' ELSE '#CC-TEST2' END
+      offender_id IS DISTINCT FROM CASE WHEN id = v_order1_id THEN 'A1234567' ELSE 'B7654321' END
+      OR order_number IS DISTINCT FROM CASE WHEN id = v_order1_id THEN '#CC-TEST1' ELSE '#CC-TEST2' END
       OR barcode IS DISTINCT FROM CASE WHEN id = v_order1_id THEN 'BC-TEST1' ELSE 'BC-TEST2' END
       OR facility_id IS DISTINCT FROM CASE WHEN id = v_order1_id THEN v_fac1_id ELSE v_fac2_id END
     )
   ) THEN
-    RAISE EXCEPTION 'SAFETY HALT: Existing order matches test UUIDs but is not a disposable test fixture.';
+    RAISE EXCEPTION 'SAFETY HALT: Existing order matches test UUIDs but does not match complete expected test fixture identity (offender_id, order_number, barcode, facility_id).';
   END IF;
 
   -- Strictly prevent deleting non-fixture orders that happen to reference the test offender IDs:
@@ -266,9 +277,14 @@ BEGIN
   IF EXISTS (
     SELECT 1 FROM public.notifications
     WHERE id = v_notif_id
-    AND offender_id IS DISTINCT FROM 'A1234567'
+    AND (
+      offender_id IS DISTINCT FROM 'A1234567'
+      OR type IS DISTINCT FROM 'TEST'
+      OR title IS DISTINCT FROM 'Original Title'
+      OR message IS DISTINCT FROM 'Original Message'
+    )
   ) THEN
-    RAISE EXCEPTION 'SAFETY HALT: Existing notification matches test UUIDs but is not a disposable test fixture.';
+    RAISE EXCEPTION 'SAFETY HALT: Existing notification matches test UUID (v_notif_id) but does not match complete expected test fixture identity (offender_id, type, title, message).';
   END IF;
 
   IF EXISTS (
@@ -287,7 +303,7 @@ BEGIN
   DELETE FROM public.order_items WHERE order_id IN (v_order1_id, v_order2_id);
   DELETE FROM public.order_status_history WHERE order_id IN (v_order1_id, v_order2_id);
   DELETE FROM public.orders WHERE id IN (v_order1_id, v_order2_id);
-  DELETE FROM public.notifications WHERE id = v_notif_id;
+  DELETE FROM public.notifications WHERE id = v_notif_id AND offender_id = 'A1234567' AND type = 'TEST';
   DELETE FROM public.audit_logs WHERE id = v_audit_id;
   DELETE FROM public.deposits WHERE id = v_dep1_id;
   DELETE FROM public.family_offender_links
@@ -304,7 +320,9 @@ BEGIN
     WHERE id IN (v_inmate_a_uid, v_inmate_b_uid, v_family_1_uid, v_family_2_uid, v_staff_fac1_uid, v_staff_fac2_uid)
       AND email LIKE '%@canteen.test';
   END IF;
-  DELETE FROM public.facilities WHERE id IN (v_fac1_id, v_fac2_id);
+  DELETE FROM public.facilities
+  WHERE id IN (v_fac1_id, v_fac2_id)
+    AND name IN ('Cumberland Regional Facility (Test)', 'Westside Correctional Center (Test)');
 
   -- Insert Facilities
   INSERT INTO public.facilities (id, name, weekly_reset_day, max_weekly_spend)
@@ -546,6 +564,92 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 
 -- ==============================================================================
+-- TEST 3b: Setting Authorization GUC Cannot Bypass Balance / Spending Protection (Bypass Prevention)
+-- Verifies that authenticated clients attempting to manipulate custom session GUCs
+-- (e.g. canteen.authorized_transaction or canteen._internal_balance_nonce) are strictly
+-- blocked from directly modifying inmate balance or current_weekly_spent.
+-- ==============================================================================
+DO $$
+DECLARE
+  v_bal_blocked BOOLEAN := false;
+  v_bal_err_code TEXT := '';
+  v_bal_err_msg TEXT := '';
+  v_spent_blocked BOOLEAN := false;
+  v_spent_err_code TEXT := '';
+  v_spent_err_msg TEXT := '';
+  v_admin_bal_blocked BOOLEAN := false;
+  v_admin_bal_code TEXT := '';
+  v_admin_bal_msg TEXT := '';
+  v_stored_balance NUMERIC(10, 2);
+  v_stored_spent NUMERIC(10, 2);
+BEGIN
+  -- Part 1: Inmate A role sets authorization GUCs and attempts direct balance & spent modification
+  RESET ROLE;
+  PERFORM set_config('request.jwt.claims', '{"sub": "aaaa1111-aaaa-1111-aaaa-111111111111", "role": "authenticated"}', true);
+  SET LOCAL ROLE authenticated;
+
+  -- Attempt to bypass security boundary by asserting custom GUCs
+  PERFORM set_config('canteen.authorized_transaction', 'true', true);
+  PERFORM set_config('canteen._internal_balance_nonce', 'true', true);
+
+  BEGIN
+    UPDATE public.offenders SET balance = 9999.00 WHERE id = 'A1234567';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_bal_err_code = RETURNED_SQLSTATE, v_bal_err_msg = MESSAGE_TEXT;
+    v_bal_blocked := true;
+  END;
+
+  BEGIN
+    UPDATE public.offenders SET current_weekly_spent = 0.00 WHERE id = 'A1234567';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_spent_err_code = RETURNED_SQLSTATE, v_spent_err_msg = MESSAGE_TEXT;
+    v_spent_blocked := true;
+  END;
+
+  -- Part 2: Staff / Admin role also attempts direct balance modification via GUC
+  RESET ROLE;
+  PERFORM set_config('request.jwt.claims', '{"sub": "eeee5555-eeee-5555-eeee-555555555555", "role": "authenticated"}', true);
+  SET LOCAL ROLE authenticated;
+
+  PERFORM set_config('canteen.authorized_transaction', 'true', true);
+  PERFORM set_config('canteen._internal_balance_nonce', 'true', true);
+
+  BEGIN
+    UPDATE public.offenders SET balance = 5000.00 WHERE id = 'A1234567';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_admin_bal_code = RETURNED_SQLSTATE, v_admin_bal_msg = MESSAGE_TEXT;
+    v_admin_bal_blocked := true;
+  END;
+
+  -- Verify physical stored values under superuser
+  RESET ROLE;
+  SELECT balance, current_weekly_spent INTO v_stored_balance, v_stored_spent
+  FROM public.offenders WHERE id = 'A1234567';
+
+  IF v_bal_blocked AND v_spent_blocked AND v_admin_bal_blocked
+     AND v_stored_balance = 82.50 AND v_stored_spent = 0.00 THEN
+    INSERT INTO test_results VALUES (
+      31,
+      'Setting authorization GUC cannot bypass balance or weekly spending protection (GUC tamper rejection)',
+      true,
+      format('All GUC bypass attempts blocked [Inmate bal: %s, Inmate spent: %s, Admin bal: %s], stored balance ($%s) and spent ($%s) intact',
+        v_bal_err_code, v_spent_err_code, v_admin_bal_code, v_stored_balance, v_stored_spent)
+    );
+  ELSE
+    INSERT INTO test_results VALUES (
+      31,
+      'GUC bypass protection failed: direct balance or spending was modifiable via GUC manipulation',
+      false,
+      format('Bal blocked: %s [%s], Spent blocked: %s [%s], Admin bal blocked: %s [%s], Stored balance: %s, Stored spent: %s',
+        v_bal_blocked, v_bal_err_code, v_spent_blocked, v_spent_err_code, v_admin_bal_blocked, v_admin_bal_code, v_stored_balance, v_stored_spent)
+    );
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE;
+  INSERT INTO test_results VALUES (31, 'GUC bypass security test error', false, SQLERRM);
+END $$;
+
+-- ==============================================================================
 -- TEST 4: Family User 1 (Approved link to Inmate A, Facility 1) (RLS Verification)
 -- ==============================================================================
 DO $$
@@ -705,10 +809,27 @@ DECLARE
 BEGIN
   -- Ensure test notification fixture is in its pristine unread state
   RESET ROLE;
+  IF EXISTS (
+    SELECT 1 FROM public.notifications
+    WHERE id = v_notif_id
+    AND (
+      offender_id IS DISTINCT FROM 'A1234567'
+      OR type IS DISTINCT FROM 'TEST'
+      OR title IS DISTINCT FROM 'Original Title'
+      OR message IS DISTINCT FROM 'Original Message'
+    )
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Notification % exists but does not match exact expected test fixture identity (offender_id, type, title, message). Refusing to overwrite.', v_notif_id;
+  END IF;
+
   INSERT INTO public.notifications (id, offender_id, type, title, message, read)
   VALUES (v_notif_id, 'A1234567', 'TEST', 'Original Title', 'Original Message', false)
   ON CONFLICT (id) DO UPDATE
-  SET title = 'Original Title', message = 'Original Message', read = false;
+  SET title = 'Original Title', message = 'Original Message', read = false
+  WHERE notifications.offender_id = 'A1234567'
+    AND notifications.type = 'TEST'
+    AND notifications.title = 'Original Title'
+    AND notifications.message = 'Original Message';
 
   -- Switch to authenticated inmate
   PERFORM set_config('request.jwt.claims', '{"sub": "aaaa1111-aaaa-1111-aaaa-111111111111", "role": "authenticated"}', true);
@@ -1177,6 +1298,34 @@ SELECT
   details AS "Verification Details"
 FROM test_results
 ORDER BY test_num ASC;
+
+-- ==============================================================================
+-- FINAL TEST RESULT ENFORCEMENT & INTEGRITY ASSERTION
+-- ==============================================================================
+DO $$
+DECLARE
+  v_failed_count INTEGER;
+  v_total_count INTEGER;
+  v_failed_tests TEXT;
+BEGIN
+  SELECT COUNT(*) INTO v_total_count FROM test_results;
+  SELECT COUNT(*) INTO v_failed_count FROM test_results WHERE passed = false;
+
+  IF v_total_count < 13 THEN
+    RAISE EXCEPTION 'TEST SUITE INCOMPLETE: Expected 13 security test results, but only % were recorded.', v_total_count;
+  END IF;
+
+  IF v_failed_count > 0 THEN
+    SELECT string_agg(format('Test %s (%s): %s', test_num, test_name, details), E'\n  ')
+    INTO v_failed_tests
+    FROM test_results
+    WHERE passed = false;
+
+    RAISE EXCEPTION E'SECURITY TEST SUITE FAILED: % of % tests failed:\n  %', v_failed_count, v_total_count, v_failed_tests;
+  END IF;
+
+  RAISE NOTICE 'ALL % SECURITY TESTS VERIFIED SUCCESSFULLY IN LOCAL SESSION.', v_total_count;
+END $$;
 
 -- ==============================================================================
 -- ROLLBACK ALL TEST FIXTURES

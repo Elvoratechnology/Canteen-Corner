@@ -137,6 +137,11 @@ export async function POST(req: NextRequest) {
       nextDelivery.setHours(14, 0, 0, 0);
 
       // 6. Deduct stock from each aggregated product
+      // Set transaction authorization config in PostgreSQL if RLS / balance trigger is active
+      if (process.env.DATABASE_URL?.startsWith('postgres')) {
+        await tx.$executeRawUnsafe(`SELECT set_config('canteen.authorized_transaction', 'true', true);`).catch(() => {});
+      }
+
       for (const [productId, quantity] of Array.from(aggregatedItemsMap.entries())) {
         await tx.product.update({
           where: { id: productId },

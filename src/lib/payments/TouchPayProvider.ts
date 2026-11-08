@@ -58,6 +58,10 @@ export class TouchPayProvider implements IPaymentProvider {
       return { valid: false, error: 'Missing x-touchpay-signature header' };
     }
 
+    if (!this.webhookSecret && process.env.NODE_ENV === 'production') {
+      return { valid: false, error: 'TouchPay webhook secret not configured on the server.' };
+    }
+
     // Cryptographic Replay Protection: verify webhook timestamp window
     const timestampStr = headers['x-touchpay-timestamp'] || headers['X-TouchPay-Timestamp'];
     if (timestampStr) {
@@ -72,12 +76,25 @@ export class TouchPayProvider implements IPaymentProvider {
 
     // Compute expected HMAC SHA256 signature
     const expectedSig = crypto
-      .createHmac('sha256', this.webhookSecret)
+      .createHmac('sha256', this.webhookSecret || 'tp_whsec_mock_canteen_corner_verification_sig')
       .update(rawBody)
       .digest('hex');
 
+    let isSignatureValid = false;
+    try {
+      const sigBuf = Buffer.from(signature, 'utf8');
+      const expBuf = Buffer.from(expectedSig, 'utf8');
+      if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
+        isSignatureValid = true;
+      }
+    } catch {
+      isSignatureValid = false;
+    }
+
     const isTestAllowed = process.env.NODE_ENV !== 'production';
-    const isSignatureValid = signature === expectedSig || (isTestAllowed && signature.startsWith('test_'));
+    if (!isSignatureValid && isTestAllowed && (signature.startsWith('test_') || signature === this.webhookSecret)) {
+      isSignatureValid = true;
+    }
 
     if (!isSignatureValid) {
       return { valid: false, error: 'Invalid HMAC webhook signature' };
@@ -85,14 +102,60 @@ export class TouchPayProvider implements IPaymentProvider {
 
     try {
       const payload = JSON.parse(rawBody) as TouchPayWebhookPayload;
+      if (!payload.providerRef || !payload.idempotencyKey || typeof payload.amount !== 'number' || payload.amount <= 0) {
+        return { valid: false, error: 'Malformed webhook payload' };
+      }
       return { valid: true, payload };
     } catch {
       return { valid: false, error: 'JSON parse error' };
     }
   }
 
-  async processPaymentConfirmation(providerRef: string, idempotencyKey: string) {
-    return this.fallbackMock.processPaymentConfirmation(providerRef, idempotencyKey);
+  async processPaymentConfirmation(
+    providerRef: string,
+    idempotencyKey: string,
+    verifiedAmount?: number
+  ) {
+    if (process.env.SUPABASE_SERVICE_ROLE_KEY && (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL)) {
+      try {
+        const { createAdminClient } = await import('@/lib/supabase/admin');
+        const adminClient = createAdminClient();
+
+        let amountToVerify = verifiedAmount;
+        if (amountToVerify === undefined) {
+          const { data: dep, error: depErr } = await adminClient
+            .from('deposits')
+            .select('amount')
+            .eq('provider_ref', providerRef)
+            .single();
+
+          if (depErr || !dep) {
+            throw new Error(depErr?.message || `Deposit reference ${providerRef} not found.`);
+          }
+          amountToVerify = dep.amount;
+        }
+
+        const { data, error } = await adminClient.rpc('process_confirmed_touchpay_deposit', {
+          p_provider_ref: providerRef,
+          p_idempotency_key: idempotencyKey,
+          p_verified_amount: amountToVerify,
+          p_currency: 'USD',
+        });
+
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        return {
+          success: data?.status === 'SUCCEEDED' || data?.alreadyProcessed === true,
+          message: data?.message || 'Deposit confirmed successfully via Supabase RPC.',
+        };
+      } catch (err: any) {
+        console.warn('Supabase RPC confirmation attempt, falling back to database transaction:', err?.message);
+      }
+    }
+
+    return this.fallbackMock.processPaymentConfirmation(providerRef, idempotencyKey, verifiedAmount);
   }
 
   async getPaymentStatus(providerRef: string) {
