@@ -70,8 +70,6 @@ export async function GET(req: NextRequest) {
       offenders: offenders.map((o) => ({
         id: o.id,
         name: o.name,
-        unit: o.unit,
-        housing: o.housing,
         facilityName: o.facility.name,
         maxDepositAmount: o.facility.maxDepositAmount,
         giftPackagesEnabled: o.facility.giftPackagesEnabled,

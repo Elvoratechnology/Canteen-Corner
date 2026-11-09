@@ -10,13 +10,9 @@ const ConfirmSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
-    // In production environments, client-triggered simulation must be explicitly forbidden
-    // unless the sandbox flag ENABLE_TOUCHPAY_SIMULATION is deliberately enabled.
-    if (process.env.NODE_ENV === 'production' && process.env.ENABLE_TOUCHPAY_SIMULATION !== 'true') {
-      return NextResponse.json(
-        { error: 'SECURITY VIOLATION: Direct client deposit confirmation is disabled in production. Deposits must be confirmed via the signed TouchPay payment gateway webhook.' },
-        { status: 403 }
-      );
+    // Return 404 in production regardless of ENABLE_TOUCHPAY_SIMULATION
+    if (process.env.NODE_ENV === 'production') {
+      return NextResponse.json({ error: 'Not Found' }, { status: 404 });
     }
 
     const session = await getCurrentSession();

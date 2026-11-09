@@ -1,6 +1,17 @@
 {
   "css.lint.unknownAtRules": "ignore",
   "scss.lint.unknownAtRules": "ignore",
-  "less.lint.unknownAtRules": "ignore"
+  "less.lint.unknownAtRules": "ignore",
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.expand": false,
+  "explorer.fileNesting.patterns": {
+    "package.json": "package-lock.json, .npmrc, .yarnrc*, pnpm-lock.yaml",
+    "tsconfig.json": "tsconfig.*.json, next-env.d.ts",
+    "tailwind.config.js": "postcss.config.js, postcss.config.mjs, tailwind.config.*",
+    "next.config.mjs": "next.config.*",
+    ".env": ".env.*, .env.example",
+    "docker-compose.yml": "Dockerfile, Dockerfile.*, .dockerignore",
+    "README.md": "ARCHITECTURE.md, SECURITY_CHECKLIST.md, LICENSE*",
+    "vitest.config.ts": "vite.config.*"
+  }
 }
-

@@ -9,31 +9,40 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // Require valid facilityId for warehouse staff; never omit facility filtering
+    if (!session.facilityId) {
+      return NextResponse.json(
+        { error: 'User is not assigned to a facility.' },
+        { status: 403 }
+      );
+    }
+
     const { searchParams } = new URL(req.url);
     const statusFilter = searchParams.get('status');
     const search = searchParams.get('search');
     const page = parseInt(searchParams.get('page') || '1');
     const limit = 20;
 
-    const whereClause: any = {};
-
-    // Multi-tenant facility isolation
-    if (session.facilityId) {
-      whereClause.offender = {
-        ...whereClause.offender,
+    // Multi-tenant facility isolation: ensure all returned orders belong to supervisor's facility
+    const whereClause: any = {
+      offender: {
         facilityId: session.facilityId,
-      };
-    }
+      },
+    };
 
     if (statusFilter && statusFilter !== 'ALL') {
       whereClause.status = statusFilter;
     }
 
     if (search && search.trim() !== '') {
-      whereClause.OR = [
-        { orderNumber: { contains: search.trim() } },
-        { offender: { name: { contains: search.trim() } } },
-        { offender: { id: { contains: search.trim().toUpperCase() } } },
+      whereClause.AND = [
+        {
+          OR: [
+            { orderNumber: { contains: search.trim() } },
+            { offender: { name: { contains: search.trim() } } },
+            { offender: { id: { contains: search.trim().toUpperCase() } } },
+          ],
+        },
       ];
     }
 

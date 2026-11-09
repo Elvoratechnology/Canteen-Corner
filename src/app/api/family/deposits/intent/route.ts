@@ -52,6 +52,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Family account record not found.' }, { status: 403 });
     }
 
+    // Require an APPROVED family_offender_links relationship between authenticated family account and requested offender
+    const approvedLink = await prisma.familyOffenderLink.findFirst({
+      where: {
+        familyAccountId: familyAccount.id,
+        offenderId: offender.id,
+        status: 'APPROVED',
+      },
+    });
+
+    if (!approvedLink) {
+      return NextResponse.json(
+        { error: 'You are not authorized to deposit funds for this offender. An approved family relationship is required.' },
+        { status: 403 }
+      );
+    }
+
     const idempotencyKey = `idemp-${offender.id}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     const provider = getPaymentProvider();
 

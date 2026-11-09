@@ -39,7 +39,7 @@ export async function GET() {
       orderBy: { createdAt: 'desc' },
       include: {
         offender: {
-          select: { id: true, name: true, unit: true, housing: true },
+          select: { id: true, name: true },
         },
       },
     });
@@ -93,6 +93,22 @@ export async function POST(req: NextRequest) {
 
     if (!offender) {
       return NextResponse.json({ error: 'Offender not found' }, { status: 404 });
+    }
+
+    // Require an APPROVED family_offender_links relationship belonging to the authenticated family account and requested offender
+    const approvedLink = await prisma.familyOffenderLink.findFirst({
+      where: {
+        familyAccountId: familyAccount.id,
+        offenderId: offender.id,
+        status: 'APPROVED',
+      },
+    });
+
+    if (!approvedLink) {
+      return NextResponse.json(
+        { error: 'You are not authorized to send gift packages to this offender. An approved family relationship is required.' },
+        { status: 403 }
+      );
     }
 
     if (!offender.facility.giftPackagesEnabled) {

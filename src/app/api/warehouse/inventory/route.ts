@@ -11,7 +11,18 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    if (!session.facilityId) {
+      return NextResponse.json({ error: 'User is not assigned to a facility.' }, { status: 403 });
+    }
+
+    // Restrict product queries to supervisor/picker's session facility or global items
     const products = await prisma.product.findMany({
+      where: {
+        OR: [
+          { facilityId: session.facilityId },
+          { facilityId: null },
+        ],
+      },
       orderBy: [{ category: 'asc' }, { name: 'asc' }],
       include: {
         _count: { select: { orderItems: true } },
@@ -21,13 +32,14 @@ export async function GET() {
     // Flagged products: at or below reorder level
     const shortages = products.filter((p) => p.stock <= p.reorderLevel);
 
-    // For each shortage, find affected PROCESSING orders
+    // For each shortage, find affected PROCESSING orders in the same facility
     const affectedOrders = await Promise.all(
       shortages.map(async (prod) => {
         const affected = await prisma.order.findMany({
           where: {
             status: 'PROCESSING',
             items: { some: { productId: prod.id } },
+            offender: { facilityId: session.facilityId },
           },
           include: {
             offender: { select: { id: true, name: true, unit: true } },
@@ -73,6 +85,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (!session.facilityId) {
+      return NextResponse.json({ error: 'User is not assigned to a facility.' }, { status: 403 });
+    }
+
     const body = await req.json();
     const result = RestockSchema.safeParse(body);
     if (!result.success) {
@@ -87,6 +103,22 @@ export async function POST(req: NextRequest) {
     const product = await prisma.product.findUnique({ where: { id: productId } });
     if (!product) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+    }
+
+    // Prevent facility supervisors from modifying shared global stock (facilityId = null)
+    if (!product.facilityId) {
+      return NextResponse.json(
+        { error: 'Access denied: Cannot restock shared global catalog products. Facility supervisors may only restock facility-specific inventory.' },
+        { status: 403 }
+      );
+    }
+
+    // Verify product facility ownership before restocking to prevent cross-facility modifications
+    if (product.facilityId !== session.facilityId) {
+      return NextResponse.json(
+        { error: 'Access denied: Product belongs to another facility.' },
+        { status: 403 }
+      );
     }
 
     const updatedProduct = await prisma.product.update({

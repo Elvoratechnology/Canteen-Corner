@@ -228,7 +228,24 @@ async function main() {
       verifiedAt: new Date(),
     },
   });
-  console.log(`Demo Family Account: family@canteen.local / Password123!`);
+
+  // Approved relationship link between Sarah Smith and John Smith (A1234567)
+  await prisma.familyOffenderLink.upsert({
+    where: {
+      familyAccountId_offenderId: {
+        familyAccountId: familyAccount.id,
+        offenderId: offender.id,
+      },
+    },
+    update: { status: 'APPROVED' },
+    create: {
+      familyAccountId: familyAccount.id,
+      offenderId: offender.id,
+      relationship: 'Sister',
+      status: 'APPROVED',
+    },
+  });
+  console.log(`Demo Family Account: family@canteen.local / Password123! (Linked to ${offender.name})`);
 
   // Past deposit from family member
   await prisma.deposit.upsert({
@@ -252,26 +269,28 @@ async function main() {
   // 7. Demo Warehouse Staff Accounts
   const pickerUser = await prisma.user.upsert({
     where: { email: 'picker@canteen.local' },
-    update: { passwordHash: staffPasswordHash },
+    update: { passwordHash: staffPasswordHash, facilityId: facility.id },
     create: {
       email: 'picker@canteen.local',
       staffId: 'STF-01',
       name: 'Marcus Miller (Picker)',
       passwordHash: staffPasswordHash,
       role: 'WAREHOUSE_PICKER',
+      facilityId: facility.id,
       emailVerified: true,
     },
   });
 
   const supervisorUser = await prisma.user.upsert({
     where: { email: 'supervisor@canteen.local' },
-    update: { passwordHash: staffPasswordHash },
+    update: { passwordHash: staffPasswordHash, facilityId: facility.id },
     create: {
       email: 'supervisor@canteen.local',
       staffId: 'STF-02',
       name: 'Chief Linda Vance (Supervisor)',
       passwordHash: staffPasswordHash,
       role: 'WAREHOUSE_SUPERVISOR',
+      facilityId: facility.id,
       emailVerified: true,
     },
   });

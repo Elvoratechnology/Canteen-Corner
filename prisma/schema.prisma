@@ -18,6 +18,8 @@ model Facility {
   updatedAt           DateTime   @updatedAt
   offenders           Offender[]
   manifests           Manifest[]
+  products            Product[]
+  users               User[]
 }
 
 model User {
@@ -31,6 +33,8 @@ model User {
   lockedUntil          DateTime?
   emailVerified        Boolean         @default(false)
   verificationToken    String?
+  facilityId           String?
+  facility             Facility?       @relation(fields: [facilityId], references: [id])
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
   offender             Offender?
@@ -61,6 +65,7 @@ model Offender {
   ledgerEntries      LedgerEntry[]
   giftPackages       GiftPackage[]
   notifications      Notification[]
+  familyOffenderLinks FamilyOffenderLink[]
 }
 
 model FamilyAccount {
@@ -73,6 +78,7 @@ model FamilyAccount {
   user          User          @relation(fields: [userId], references: [id])
   deposits      Deposit[]
   giftPackages  GiftPackage[]
+  familyOffenderLinks FamilyOffenderLink[]
 }
 
 model Product {
@@ -86,6 +92,8 @@ model Product {
   active       Boolean     @default(true)
   imageUrl     String?
   description  String?
+  facilityId   String?
+  facility     Facility?   @relation(fields: [facilityId], references: [id])
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   orderItems   OrderItem[]
@@ -233,4 +241,19 @@ model AuditLog {
   metadata     String?
   createdAt    DateTime @default(now())
 }
+
+model FamilyOffenderLink {
+  id              String        @id @default(cuid())
+  familyAccountId String
+  offenderId      String
+  status          String        @default("APPROVED") // PENDING, APPROVED, BLOCKED
+  relationship    String        @default("Family")
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  familyAccount   FamilyAccount @relation(fields: [familyAccountId], references: [id], onDelete: Cascade)
+  offender        Offender      @relation(fields: [offenderId], references: [id], onDelete: Cascade)
+
+  @@unique([familyAccountId, offenderId])
+}
+
 

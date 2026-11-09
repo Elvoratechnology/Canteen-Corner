@@ -34,7 +34,12 @@ export async function GET(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    if (session.facilityId && (order.offender as any)?.facilityId && (order.offender as any).facilityId !== session.facilityId) {
+    // Verify the order belongs to session.facilityId before returning details
+    if (!session.facilityId) {
+      return NextResponse.json({ error: 'User is not assigned to a facility.' }, { status: 403 });
+    }
+
+    if (order.offender.facilityId !== session.facilityId) {
       return NextResponse.json({ error: 'Access denied: Order belongs to another facility.' }, { status: 403 });
     }
 
@@ -80,7 +85,12 @@ export async function PATCH(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    if (session.facilityId && (order.offender as any)?.facilityId && (order.offender as any).facilityId !== session.facilityId) {
+    // Verify the order belongs to session.facilityId before returning details
+    if (!session.facilityId) {
+      return NextResponse.json({ error: 'User is not assigned to a facility.' }, { status: 403 });
+    }
+
+    if (order.offender.facilityId !== session.facilityId) {
       return NextResponse.json({ error: 'Access denied: Order belongs to another facility.' }, { status: 403 });
     }
 

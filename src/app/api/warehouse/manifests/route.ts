@@ -11,7 +11,12 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    if (!session.facilityId) {
+      return NextResponse.json({ error: 'User is not assigned to a facility.' }, { status: 403 });
+    }
+
     const manifests = await prisma.manifest.findMany({
+      where: { facilityId: session.facilityId },
       orderBy: { createdAt: 'desc' },
       include: {
         facility: { select: { name: true } },
@@ -24,11 +29,12 @@ export async function GET() {
       },
     });
 
-    // Also get PACKED orders eligible for manifest generation (not yet assigned to a manifest)
+    // Also get PACKED orders eligible for manifest generation (not yet assigned to a manifest) for this facility
     const eligibleOrders = await prisma.order.findMany({
       where: {
         status: { in: ['PACKED', 'OUT_FOR_DELIVERY'] },
         manifestId: null,
+        offender: { facilityId: session.facilityId },
       },
       include: {
         offender: { select: { id: true, name: true, unit: true, housing: true } },
@@ -61,6 +67,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (!session.facilityId) {
+      return NextResponse.json({ error: 'User is not assigned to a facility.' }, { status: 403 });
+    }
+
     const body = await req.json();
     const result = GenerateManifestSchema.safeParse(body);
     if (!result.success) {
@@ -72,17 +82,29 @@ export async function POST(req: NextRequest) {
 
     const { unit, housing, deliveryDate, orderIds } = result.data;
 
-    // Fetch facility
-    const facility = await prisma.facility.findFirst();
+    // Use the authenticated supervisor's session.facilityId (remove hardcoded facility selection)
+    const facility = await prisma.facility.findUnique({
+      where: { id: session.facilityId },
+    });
     if (!facility) {
       return NextResponse.json({ error: 'Facility not found' }, { status: 404 });
     }
 
-    // Fetch the selected orders
+    // Fetch the selected orders ensuring all belong to the authenticated supervisor's facility
     const orders = await prisma.order.findMany({
-      where: { id: { in: orderIds } },
+      where: {
+        id: { in: orderIds },
+        offender: { facilityId: session.facilityId },
+      },
       include: { items: true },
     });
+
+    if (orders.length !== orderIds.length) {
+      return NextResponse.json(
+        { error: 'One or more selected orders are invalid or belong to another facility.' },
+        { status: 403 }
+      );
+    }
 
     const totalItems = orders.reduce(
       (sum, o) => sum + o.items.reduce((s, i) => s + i.quantity, 0),

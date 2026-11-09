@@ -258,20 +258,20 @@ BEGIN
   IF EXISTS (
     SELECT 1 FROM public.family_offender_links
     WHERE family_account_id = v_fam_acc2_id
-    AND offender_id IS DISTINCT FROM 'A1234567'
+    AND offender_id NOT IN ('A1234567', 'B7654321')
   ) THEN
-    RAISE EXCEPTION 'SAFETY HALT: Family Account 2 (v_fam_acc2_id) has an unverified relationship link. Only disposable Test 11 link to Inmate A (A1234567) is permitted.';
+    RAISE EXCEPTION 'SAFETY HALT: Family Account 2 (v_fam_acc2_id) has an unverified relationship link. Only disposable test links to Inmate A or B are permitted.';
   END IF;
 
   IF EXISTS (
     SELECT 1 FROM public.deposits
-    WHERE id = v_dep1_id
+    WHERE (id = v_dep1_id OR provider_ref IN ('TP-TEST-001', 'TP-TEST-MISMATCH-FAC', 'TP-TEST-COMPLETED-AT', 'TP-TEST-VALID-INTENT'))
     AND (
-      provider_ref IS DISTINCT FROM 'TP-TEST-001'
-      OR offender_id IS DISTINCT FROM 'A1234567'
+      provider_ref NOT IN ('TP-TEST-001', 'TP-TEST-MISMATCH-FAC', 'TP-TEST-COMPLETED-AT', 'TP-TEST-VALID-INTENT')
+      OR offender_id NOT IN ('A1234567', 'B7654321')
     )
   ) THEN
-    RAISE EXCEPTION 'SAFETY HALT: Existing deposit matches test UUIDs but is not a disposable test fixture.';
+    RAISE EXCEPTION 'SAFETY HALT: Existing deposit matches test UUIDs or test provider refs but is not a disposable test fixture.';
   END IF;
 
   IF EXISTS (
@@ -305,10 +305,10 @@ BEGIN
   DELETE FROM public.orders WHERE id IN (v_order1_id, v_order2_id);
   DELETE FROM public.notifications WHERE id = v_notif_id AND offender_id = 'A1234567' AND type = 'TEST';
   DELETE FROM public.audit_logs WHERE id = v_audit_id;
-  DELETE FROM public.deposits WHERE id = v_dep1_id;
+  DELETE FROM public.deposits WHERE id = v_dep1_id OR provider_ref IN ('TP-TEST-MISMATCH-FAC', 'TP-TEST-COMPLETED-AT', 'TP-TEST-VALID-INTENT');
   DELETE FROM public.family_offender_links
   WHERE (family_account_id = v_fam_acc1_id AND offender_id = 'A1234567')
-     OR (family_account_id = v_fam_acc2_id AND offender_id = 'A1234567');
+     OR (family_account_id = v_fam_acc2_id AND offender_id IN ('A1234567', 'B7654321'));
   DELETE FROM public.family_accounts WHERE id IN (v_fam_acc1_id, v_fam_acc2_id);
   DELETE FROM public.products WHERE id IN (v_prod1_id, v_prod2_id);
   DELETE FROM public.offenders WHERE id IN ('A1234567', 'B7654321') AND user_id IN (v_inmate_a_uid, v_inmate_b_uid);
@@ -909,6 +909,126 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 
 -- ==============================================================================
+-- TEST 8b: Family Deposit Intent Facility Matching & completed_at Guards (Corrective RLS Verification)
+-- ==============================================================================
+DO $$
+DECLARE
+  v_fixture_pre INTEGER := 0;
+  v_mismatched_fac_blocked BOOLEAN := false;
+  v_completed_at_blocked BOOLEAN := false;
+  v_legit_deposit_allowed BOOLEAN := false;
+  v_mismatch_count INTEGER := 0;
+  v_completed_count INTEGER := 0;
+  v_err_code TEXT := '';
+  v_err_msg TEXT := '';
+  v_legit_id UUID;
+  v_legit_status TEXT;
+  v_legit_completed TIMESTAMPTZ;
+BEGIN
+  RESET ROLE;
+  -- Clean up prior test artifacts if present
+  DELETE FROM public.deposits WHERE provider_ref IN ('TP-TEST-MISMATCH-FAC', 'TP-TEST-COMPLETED-AT', 'TP-TEST-VALID-INTENT');
+
+  -- Pre-Check: Ensure target fixtures exist before negative assertions
+  SELECT COUNT(*) INTO v_fixture_pre
+  FROM public.family_offender_links
+  WHERE family_account_id = '77777777-7777-7777-7777-777777777771'
+    AND offender_id = 'A1234567'
+    AND status = 'APPROVED';
+
+  IF v_fixture_pre != 1 THEN
+    RAISE EXCEPTION 'TEST 8b PRE-CHECK FAILED: Family User 1 does not have an approved link to Inmate A.';
+  END IF;
+
+  -- Simulate Family User 1 (linked to Inmate A, Facility 1)
+  PERFORM set_config('request.jwt.claims', '{"sub": "cccc3333-cccc-3333-cccc-333333333333", "role": "authenticated"}', true);
+  SET LOCAL ROLE authenticated;
+
+  -- Case 1: Attempt to insert deposit for Inmate A (Facility 1), but specifying Facility 2
+  v_err_code := '';
+  v_err_msg := '';
+  BEGIN
+    INSERT INTO public.deposits (
+      facility_id, offender_id, family_account_id, amount, fee, total_paid,
+      currency, provider, provider_ref, status, idempotency_key
+    ) VALUES (
+      '22222222-2222-2222-2222-222222222222', 'A1234567', '77777777-7777-7777-7777-777777777771',
+      50.00, 3.50, 53.50, 'USD', 'TOUCHPAY', 'TP-TEST-MISMATCH-FAC', 'PENDING', 'idemp-mismatch-fac'
+    );
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err_code = RETURNED_SQLSTATE, v_err_msg = MESSAGE_TEXT;
+    IF v_err_code IN ('44000', '42501', 'P0001') OR v_err_msg ILIKE '%row-level security%' OR v_err_msg ILIKE '%check violation%' THEN
+      v_mismatched_fac_blocked := true;
+    END IF;
+  END;
+
+  -- Case 2: Attempt to insert deposit with non-NULL completed_at
+  v_err_code := '';
+  v_err_msg := '';
+  BEGIN
+    INSERT INTO public.deposits (
+      facility_id, offender_id, family_account_id, amount, fee, total_paid,
+      currency, provider, provider_ref, status, idempotency_key, completed_at
+    ) VALUES (
+      '11111111-1111-1111-1111-111111111111', 'A1234567', '77777777-7777-7777-7777-777777777771',
+      50.00, 3.50, 53.50, 'USD', 'TOUCHPAY', 'TP-TEST-COMPLETED-AT', 'PENDING', 'idemp-completed-at', now()
+    );
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_err_code = RETURNED_SQLSTATE, v_err_msg = MESSAGE_TEXT;
+    IF v_err_code IN ('44000', '42501', 'P0001') OR v_err_msg ILIKE '%row-level security%' OR v_err_msg ILIKE '%check violation%' THEN
+      v_completed_at_blocked := true;
+    END IF;
+  END;
+
+  -- Case 3: Legitimate deposit intent (facility matches offender, completed_at is NULL, PENDING status)
+  BEGIN
+    INSERT INTO public.deposits (
+      facility_id, offender_id, family_account_id, amount, fee, total_paid,
+      currency, provider, provider_ref, status, idempotency_key, completed_at
+    ) VALUES (
+      '11111111-1111-1111-1111-111111111111', 'A1234567', '77777777-7777-7777-7777-777777777771',
+      50.00, 3.50, 53.50, 'USD', 'TOUCHPAY', 'TP-TEST-VALID-INTENT', 'PENDING', 'idemp-valid-intent-001', NULL
+    )
+    RETURNING id, status, completed_at INTO v_legit_id, v_legit_status, v_legit_completed;
+
+    IF v_legit_id IS NOT NULL AND v_legit_status = 'PENDING' AND v_legit_completed IS NULL THEN
+      v_legit_deposit_allowed := true;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    v_legit_deposit_allowed := false;
+  END;
+
+  RESET ROLE;
+  -- Physically verify that blocked attempts persisted zero rows
+  SELECT COUNT(*) INTO v_mismatch_count FROM public.deposits WHERE provider_ref = 'TP-TEST-MISMATCH-FAC';
+  SELECT COUNT(*) INTO v_completed_count FROM public.deposits WHERE provider_ref = 'TP-TEST-COMPLETED-AT';
+  -- Clean up legitimate test deposit
+  DELETE FROM public.deposits WHERE provider_ref = 'TP-TEST-VALID-INTENT';
+
+  IF v_mismatched_fac_blocked AND v_mismatch_count = 0
+     AND v_completed_at_blocked AND v_completed_count = 0
+     AND v_legit_deposit_allowed THEN
+    INSERT INTO test_results VALUES (
+      82,
+      'Family deposit intent rejects mismatched facility_id and forged completed_at while allowing valid intent',
+      true,
+      'Mismatched facility blocked; non-null completed_at blocked; valid pending intent allowed'
+    );
+  ELSE
+    INSERT INTO test_results VALUES (
+      82,
+      'Family deposit intent security check failed',
+      false,
+      format('Mismatched facility blocked: %s (rows=%s), completed_at blocked: %s (rows=%s), Valid intent allowed: %s',
+             v_mismatched_fac_blocked, v_mismatch_count, v_completed_at_blocked, v_completed_count, v_legit_deposit_allowed)
+    );
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE;
+  INSERT INTO test_results VALUES (82, 'Family deposit intent test error', false, SQLERRM);
+END $$;
+
+-- ==============================================================================
 -- TEST 9: Inactive Account Access Lockout (is_active = false) (RLS & Helper Verification)
 -- ==============================================================================
 DO $$
@@ -1130,6 +1250,164 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 
 -- ==============================================================================
+-- TEST 11b: Family Links Facility Boundary on UPDATE and DELETE (Corrective RLS Verification)
+-- ==============================================================================
+DO $$
+DECLARE
+  v_fac1_link_pre INTEGER := 0;
+  v_fac2_link_pre INTEGER := 0;
+  v_cross_delete_blocked BOOLEAN := false;
+  v_cross_update_blocked BOOLEAN := false;
+  v_own_delete_allowed BOOLEAN := false;
+  v_rows_affected INTEGER := 0;
+  v_fac2_link_count INTEGER := 0;
+  v_fac2_link_status TEXT;
+  v_fac1_link_count INTEGER := 0;
+BEGIN
+  RESET ROLE;
+
+  -- Setup: Ensure Link 1 (Facility 1 Offender A) and Link 2 (Facility 2 Offender B) exist
+  DELETE FROM public.family_offender_links
+  WHERE (family_account_id = '77777777-7777-7777-7777-777777777771' AND offender_id = 'A1234567')
+     OR (family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'B7654321');
+
+  -- Elevate Facility 1 staff (v_staff_fac1_uid) to role 'ADMIN' for Facility 1 testing
+  UPDATE public.user_profiles
+  SET role = 'ADMIN'
+  WHERE id = 'eeee5555-eeee-5555-eeee-555555555555';
+
+  -- Set service_role claims to allow seeding approved and pending link fixtures
+  PERFORM set_config('request.jwt.claims', '{"role": "service_role"}', true);
+
+  INSERT INTO public.family_offender_links (family_account_id, offender_id, status, relationship)
+  VALUES ('77777777-7777-7777-7777-777777777771', 'A1234567', 'APPROVED', 'Mother'),
+         ('77777777-7777-7777-7777-777777777772', 'B7654321', 'PENDING', 'Cousin');
+
+  RESET ROLE;
+
+  -- Pre-Check: Verify both target fixtures exist before negative assertions
+  SELECT COUNT(*) INTO v_fac1_link_pre
+  FROM public.family_offender_links
+  WHERE family_account_id = '77777777-7777-7777-7777-777777777771' AND offender_id = 'A1234567';
+
+  SELECT COUNT(*) INTO v_fac2_link_pre
+  FROM public.family_offender_links
+  WHERE family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'B7654321';
+
+  IF v_fac1_link_pre != 1 OR v_fac2_link_pre != 1 THEN
+    RAISE EXCEPTION 'TEST 11b PRE-CHECK FAILED: Required test links could not be prepared.';
+  END IF;
+
+  -- Case 1: Facility 1 Admin attempts to DELETE Link 2 (belonging to Facility 2 Offender B)
+  PERFORM set_config('request.jwt.claims', '{"sub": "eeee5555-eeee-5555-eeee-555555555555", "role": "authenticated"}', true);
+  SET LOCAL ROLE authenticated;
+
+  v_rows_affected := 0;
+  BEGIN
+    DELETE FROM public.family_offender_links
+    WHERE family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'B7654321';
+    GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+  EXCEPTION WHEN OTHERS THEN
+    v_rows_affected := 0;
+  END;
+
+  RESET ROLE;
+  SELECT COUNT(*) INTO v_fac2_link_count
+  FROM public.family_offender_links
+  WHERE family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'B7654321';
+
+  IF COALESCE(v_rows_affected, 0) = 0 AND v_fac2_link_count = 1 THEN
+    v_cross_delete_blocked := true;
+  END IF;
+
+  -- Case 2: Facility 1 Staff (Supervisor/Admin) attempts to UPDATE Link 2 (Facility 2 Offender B)
+  PERFORM set_config('request.jwt.claims', '{"sub": "eeee5555-eeee-5555-eeee-555555555555", "role": "authenticated"}', true);
+  SET LOCAL ROLE authenticated;
+
+  v_rows_affected := 0;
+  BEGIN
+    UPDATE public.family_offender_links
+    SET status = 'APPROVED'
+    WHERE family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'B7654321';
+    GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+  EXCEPTION WHEN OTHERS THEN
+    v_rows_affected := 0;
+  END;
+
+  RESET ROLE;
+  SELECT status INTO v_fac2_link_status
+  FROM public.family_offender_links
+  WHERE family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'B7654321';
+
+  IF COALESCE(v_rows_affected, 0) = 0 AND v_fac2_link_status = 'PENDING' THEN
+    v_cross_update_blocked := true;
+  END IF;
+
+  -- Case 3: Authorized Facility 1 Admin DELETES Link 1 (within their own facility: Facility 1 Offender A)
+  PERFORM set_config('request.jwt.claims', '{"sub": "eeee5555-eeee-5555-eeee-555555555555", "role": "authenticated"}', true);
+  SET LOCAL ROLE authenticated;
+
+  v_rows_affected := 0;
+  BEGIN
+    DELETE FROM public.family_offender_links
+    WHERE family_account_id = '77777777-7777-7777-7777-777777777771' AND offender_id = 'A1234567';
+    GET DIAGNOSTICS v_rows_affected = ROW_COUNT;
+  EXCEPTION WHEN OTHERS THEN
+    v_rows_affected := 0;
+  END;
+
+  RESET ROLE;
+  SELECT COUNT(*) INTO v_fac1_link_count
+  FROM public.family_offender_links
+  WHERE family_account_id = '77777777-7777-7777-7777-777777777771' AND offender_id = 'A1234567';
+
+  IF v_rows_affected = 1 AND v_fac1_link_count = 0 THEN
+    v_own_delete_allowed := true;
+  END IF;
+
+  -- Cleanup & Restore:
+  -- Re-insert Link 1 under service_role so subsequent tests retain standard state
+  PERFORM set_config('request.jwt.claims', '{"role": "service_role"}', true);
+
+  INSERT INTO public.family_offender_links (family_account_id, offender_id, status, relationship)
+  VALUES ('77777777-7777-7777-7777-777777777771', 'A1234567', 'APPROVED', 'Mother')
+  ON CONFLICT (family_account_id, offender_id) DO UPDATE SET status = 'APPROVED';
+
+  PERFORM set_config('request.jwt.claims', '', true);
+
+  -- Remove Link 2
+  DELETE FROM public.family_offender_links
+  WHERE family_account_id = '77777777-7777-7777-7777-777777777772' AND offender_id = 'B7654321';
+
+  -- Restore Facility 1 staff role back to WAREHOUSE_PICKER
+  UPDATE public.user_profiles
+  SET role = 'WAREHOUSE_PICKER'
+  WHERE id = 'eeee5555-eeee-5555-eeee-555555555555';
+
+  IF v_cross_delete_blocked AND v_cross_update_blocked AND v_own_delete_allowed THEN
+    INSERT INTO test_results VALUES (
+      112,
+      'Facility-scoped ADMIN/Staff restricted by facility boundary on DELETE/UPDATE; same-facility DELETE allowed',
+      true,
+      'Cross-facility delete blocked (0 rows); cross-facility update blocked (0 rows); same-facility delete succeeded (1 row)'
+    );
+  ELSE
+    INSERT INTO test_results VALUES (
+      112,
+      'Facility boundary test on family links failed',
+      false,
+      format('Cross-facility delete blocked: %s, Cross-facility update blocked: %s, Own facility delete allowed: %s',
+             v_cross_delete_blocked, v_cross_update_blocked, v_own_delete_allowed)
+    );
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RESET ROLE;
+  -- Restore role in case of exception
+  UPDATE public.user_profiles SET role = 'WAREHOUSE_PICKER' WHERE id = 'eeee5555-eeee-5555-eeee-555555555555';
+  INSERT INTO test_results VALUES (112, 'Family links facility boundary test error', false, SQLERRM);
+END $$;
+
+-- ==============================================================================
 -- TEST 12: Inmate Order Placement Anti-Spoofing & Service Role Gate (RPC Security Verification)
 -- ==============================================================================
 DO $$
@@ -1311,8 +1589,8 @@ BEGIN
   SELECT COUNT(*) INTO v_total_count FROM test_results;
   SELECT COUNT(*) INTO v_failed_count FROM test_results WHERE passed = false;
 
-  IF v_total_count < 13 THEN
-    RAISE EXCEPTION 'TEST SUITE INCOMPLETE: Expected 13 security test results, but only % were recorded.', v_total_count;
+  IF v_total_count < 15 THEN
+    RAISE EXCEPTION 'TEST SUITE INCOMPLETE: Expected 15 security test results, but only % were recorded.', v_total_count;
   END IF;
 
   IF v_failed_count > 0 THEN
