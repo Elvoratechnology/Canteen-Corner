@@ -292,7 +292,7 @@ BEGIN
     WHERE id = v_audit_id
     AND (
       facility_id IS DISTINCT FROM v_fac1_id
-      OR user_id IS DISTINCT FROM v_inmate_a_uid
+      OR actor_id IS DISTINCT FROM v_inmate_a_uid::text
     )
   ) THEN
     RAISE EXCEPTION 'SAFETY HALT: Existing audit log matches test UUIDs but is not a disposable test fixture.';
@@ -387,8 +387,21 @@ BEGIN
   VALUES (v_dep1_id, v_fac1_id, 'A1234567', v_fam_acc1_id, 25.00, 28.50, 'TP-TEST-001', 'idemp-test-001', 'SUCCEEDED');
 
   -- Insert Audit Log
-  INSERT INTO public.audit_logs (id, user_id, action, entity, entity_id, facility_id, metadata)
-  VALUES (v_audit_id, v_inmate_a_uid, 'LOGIN', 'auth', 'A1234567', v_fac1_id, '{"ip":"127.0.0.1"}'::jsonb);
+  INSERT INTO public.audit_logs (
+    id, action, actor_id, actor_role, facility_id,
+    ip_address, resource_type, resource_id, metadata
+  )
+  VALUES (
+    v_audit_id,
+    'LOGIN',
+    v_inmate_a_uid::text,
+    'INMATE',
+    v_fac1_id,
+    '127.0.0.1',
+    'auth',
+    'A1234567',
+    '{"ip":"127.0.0.1"}'::jsonb
+  );
 
   -- Insert Notification
   INSERT INTO public.notifications (id, offender_id, type, title, message, read)
@@ -1039,6 +1052,7 @@ DECLARE
 BEGIN
   -- Deactivate Inmate A's user profile as postgres admin
   RESET ROLE;
+  PERFORM set_config('request.jwt.claims', '', true);
   UPDATE public.user_profiles
   SET is_active = false
   WHERE id = 'aaaa1111-aaaa-1111-aaaa-111111111111';
@@ -1053,6 +1067,7 @@ BEGIN
 
   -- Restore active status for subsequent tests
   RESET ROLE;
+  PERFORM set_config('request.jwt.claims', '', true);
   UPDATE public.user_profiles
   SET is_active = true
   WHERE id = 'aaaa1111-aaaa-1111-aaaa-111111111111';
@@ -1065,6 +1080,7 @@ BEGIN
   END IF;
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE;
+  PERFORM set_config('request.jwt.claims', '', true);
   UPDATE public.user_profiles SET is_active = true WHERE id = 'aaaa1111-aaaa-1111-aaaa-111111111111';
   INSERT INTO test_results VALUES (9, 'Inactive account test error', false, SQLERRM);
 END $$;
@@ -1265,6 +1281,7 @@ DECLARE
   v_fac1_link_count INTEGER := 0;
 BEGIN
   RESET ROLE;
+  PERFORM set_config('request.jwt.claims', '', true);
 
   -- Setup: Ensure Link 1 (Facility 1 Offender A) and Link 2 (Facility 2 Offender B) exist
   DELETE FROM public.family_offender_links
@@ -1402,6 +1419,7 @@ BEGIN
   END IF;
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE;
+  PERFORM set_config('request.jwt.claims', '', true);
   -- Restore role in case of exception
   UPDATE public.user_profiles SET role = 'WAREHOUSE_PICKER' WHERE id = 'eeee5555-eeee-5555-eeee-555555555555';
   INSERT INTO test_results VALUES (112, 'Family links facility boundary test error', false, SQLERRM);
