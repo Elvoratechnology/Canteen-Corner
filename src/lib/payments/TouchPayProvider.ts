@@ -12,15 +12,30 @@ export class TouchPayProvider implements IPaymentProvider {
   constructor() {
     this.apiKey = process.env.TOUCHPAY_API_KEY || '';
     this.webhookSecret = process.env.TOUCHPAY_WEBHOOK_SECRET || '';
-    this.facilityId = process.env.TOUCHPAY_FACILITY_ID || 'FACILITY_CC_01';
+    this.facilityId = process.env.TOUCHPAY_FACILITY_ID || (process.env.NODE_ENV === 'production' ? '' : 'FACILITY_CC_01');
     this.fallbackMock = new MockTouchPayProvider(this.webhookSecret);
   }
 
   async createPaymentIntent(req: PaymentIntentRequest): Promise<PaymentIntentResponse> {
-    // In production with live TouchPay credentials, this initiates an API call to TouchPay's institutional gateway:
-    // https://secure.touchpaydirect.com/api/v2/intents
-    if (!this.apiKey || this.apiKey.includes('test')) {
-      return this.fallbackMock.createPaymentIntent(req);
+    const isProduction = process.env.NODE_ENV === 'production';
+    const apiKey = process.env.TOUCHPAY_API_KEY !== undefined ? process.env.TOUCHPAY_API_KEY : this.apiKey;
+    const facilityId = process.env.TOUCHPAY_FACILITY_ID !== undefined ? process.env.TOUCHPAY_FACILITY_ID : this.facilityId;
+
+    if (isProduction) {
+      if (!apiKey || apiKey.trim().length === 0 || apiKey.toLowerCase().includes('test')) {
+        throw new Error(
+          'Production Security Configuration Error: Live TOUCHPAY_API_KEY is missing, empty, or invalid (test keys prohibited in Production).'
+        );
+      }
+      if (!facilityId || facilityId.trim().length === 0) {
+        throw new Error(
+          'Production Security Configuration Error: TOUCHPAY_FACILITY_ID is missing in Production. An explicit facility identifier is required.'
+        );
+      }
+    } else {
+      if (!apiKey || apiKey.toLowerCase().includes('test')) {
+        return this.fallbackMock.createPaymentIntent(req);
+      }
     }
 
     const fee = 3.50;
@@ -58,7 +73,9 @@ export class TouchPayProvider implements IPaymentProvider {
       return { valid: false, error: 'Missing x-touchpay-signature header' };
     }
 
-    if (!this.webhookSecret && process.env.NODE_ENV === 'production') {
+    const webhookSecret = process.env.TOUCHPAY_WEBHOOK_SECRET !== undefined ? process.env.TOUCHPAY_WEBHOOK_SECRET : this.webhookSecret;
+
+    if (!webhookSecret && process.env.NODE_ENV === 'production') {
       return { valid: false, error: 'TouchPay webhook secret not configured on the server.' };
     }
 
@@ -76,7 +93,7 @@ export class TouchPayProvider implements IPaymentProvider {
 
     // Compute expected HMAC SHA256 signature
     const expectedSig = crypto
-      .createHmac('sha256', this.webhookSecret || 'tp_whsec_mock_canteen_corner_verification_sig')
+      .createHmac('sha256', webhookSecret || 'tp_whsec_mock_canteen_corner_verification_sig')
       .update(rawBody)
       .digest('hex');
 
@@ -92,7 +109,7 @@ export class TouchPayProvider implements IPaymentProvider {
     }
 
     const isTestAllowed = process.env.NODE_ENV !== 'production';
-    if (!isSignatureValid && isTestAllowed && (signature.startsWith('test_') || signature === this.webhookSecret)) {
+    if (!isSignatureValid && isTestAllowed && (signature.startsWith('test_') || signature === webhookSecret)) {
       isSignatureValid = true;
     }
 
@@ -116,7 +133,53 @@ export class TouchPayProvider implements IPaymentProvider {
     idempotencyKey: string,
     verifiedAmount?: number
   ) {
-    if (process.env.SUPABASE_SERVICE_ROLE_KEY && (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL)) {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const hasSupabaseUrl = Boolean(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL);
+    const hasServiceRoleKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+    if (isProduction) {
+      if (!hasServiceRoleKey || !hasSupabaseUrl) {
+        throw new Error(
+          'Production Security Configuration Error: SUPABASE_SERVICE_ROLE_KEY and SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) are required for atomic deposit confirmation in Production.'
+        );
+      }
+
+      const { createAdminClient } = await import('@/lib/supabase/admin');
+      const adminClient = createAdminClient();
+
+      let amountToVerify = verifiedAmount;
+      if (amountToVerify === undefined) {
+        const { data: dep, error: depErr } = await adminClient
+          .from('deposits')
+          .select('amount')
+          .eq('provider_ref', providerRef)
+          .single();
+
+        if (depErr || !dep) {
+          throw new Error(depErr?.message || `Deposit reference ${providerRef} not found.`);
+        }
+        amountToVerify = dep.amount;
+      }
+
+      const { data, error } = await adminClient.rpc('process_confirmed_touchpay_deposit', {
+        p_provider_ref: providerRef,
+        p_idempotency_key: idempotencyKey,
+        p_verified_amount: amountToVerify,
+        p_currency: 'USD',
+      });
+
+      if (error) {
+        throw new Error(`Supabase RPC process_confirmed_touchpay_deposit failed: ${error.message}`);
+      }
+
+      return {
+        success: data?.status === 'SUCCEEDED' || data?.alreadyProcessed === true,
+        message: data?.message || 'Deposit confirmed successfully via Supabase RPC.',
+      };
+    }
+
+    // Development / non-production environment
+    if (hasServiceRoleKey && hasSupabaseUrl) {
       try {
         const { createAdminClient } = await import('@/lib/supabase/admin');
         const adminClient = createAdminClient();
@@ -159,7 +222,9 @@ export class TouchPayProvider implements IPaymentProvider {
   }
 
   async getPaymentStatus(providerRef: string) {
-    return this.fallbackMock.getPaymentStatus(providerRef);
+    const deposit = await prisma.deposit.findUnique({
+      where: { providerRef },
+    });
+    return (deposit?.status as any) || 'PENDING';
   }
 }
-

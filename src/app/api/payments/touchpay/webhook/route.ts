@@ -26,6 +26,23 @@ export async function POST(req: NextRequest) {
     if (event === 'payment.succeeded') {
       const result = await provider.processPaymentConfirmation(providerRef, idempotencyKey, amount);
 
+      if (!result.success) {
+        await logAuditAction({
+          action: 'TOUCHPAY_CONFIRMATION_REJECTED',
+          actorId: 'TOUCHPAY_GATEWAY',
+          actorRole: 'SYSTEM',
+          resourceType: 'DEPOSIT',
+          resourceId: providerRef,
+          metadata: { status: 'FAILED', message: result.message },
+        });
+
+        return NextResponse.json({
+          received: true,
+          processed: false,
+          message: result.message,
+        });
+      }
+
       await logAuditAction({
         action: 'TOUCHPAY_WEBHOOK_PROCESSED',
         actorId: 'TOUCHPAY_GATEWAY',
