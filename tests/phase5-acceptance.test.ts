@@ -140,7 +140,7 @@ describe('Phase 5: Acceptance Tests Suite (Per Specification)', () => {
     expect(updated.currentWeeklySpent + orderOverLimit > updated.weeklyLimit).toBe(true);
   });
 
-  it('ACCEPTANCE TEST 3: A TouchPay deposit raises the inmate balance only after confirmation, and appears in deposit history and ledger', async () => {
+  it('ACCEPTANCE TEST 3: An electronic deposit raises the inmate balance only after confirmation, and appears in deposit history and ledger', async () => {
     const provider = getPaymentProvider();
     const idemp = `idemp-acc3-${Date.now()}`;
 

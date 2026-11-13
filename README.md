@@ -9,10 +9,10 @@
 
 - **3 Dedicated Portals**:
   1. **Inmate Portal**: Offender ID + PIN authentication, catalog shopping, balance & weekly limit enforcement, order history, notification inbox.
-  2. **Family & Friends Portal**: Account verification, inmate search, TouchPay exclusive trust fund deposits, secure care gift packages.
+  2. **Family & Friends Portal**: Account verification, inmate search, Stripe & PayPal trust fund deposits, secure care gift packages.
   3. **Warehouse Portal**: Orders fulfillment queue, printable picking lists, barcode/camera scanner, inventory shortage tracking, delivery manifest generator (PDF/CSV).
 - **Accounting Compliance**: Double-entry ledger tracking every penny with zero balance reconciliation discrepancies.
-- **Strict TouchPay Payments**: Dedicated `PaymentProvider` interface with `TouchPayProvider` & `MockTouchPayProvider`, webhook signatures, and idempotency guarantees.
+- **Unified Stripe & PayPal Payments**: Multi-provider registry (`StripeProvider` & `PayPalProvider`) with cryptographic webhook signatures, shared confirmation engine, and idempotency guarantees.
 - **Dual-Mode Institutional UI (Night & Light Mode)**:
   - **Light Mode**: Crisp, high-contrast `#f8fafc` background with pure `#ffffff` cards and subtle `#e2e8f0` borders.
   - **Night Mode**: Deep neutral `#0b0f19` background with `#111827` cards and `#1f2937` borders.
@@ -71,7 +71,7 @@ npm test
 ### Automated Acceptance Tests Covered:
 - **Test 1**: Cart of 2 soap + 4 ramen + 1 coffee = $15.00; balance drops from $82.50 to $67.50; order routes to Warehouse queue.
 - **Test 2**: Orders exceeding inmate trust balance or weekly spending limit are rejected with clear error messages.
-- **Test 3**: TouchPay deposits credit the inmate balance **only** upon confirmed success, updating deposit history and double-entry ledger.
+- **Test 3**: Electronic deposits (Stripe & PayPal) credit the inmate balance **only** upon confirmed success, updating deposit history and double-entry ledger.
 - **Test 4**: Warehouse picking, packaging, barcode scanning, delivery manifest generation, and low stock shortage tracking.
 
 ---
@@ -93,7 +93,7 @@ This launches:
 ```text
 ├── src/
 │   ├── app/                      # Next.js App Router
-│   │   ├── api/                  # Route handlers (Auth, Inmate, Family, Warehouse, TouchPay)
+│   │   ├── api/                  # Route handlers (Auth, Inmate, Family, Warehouse, Payments)
 │   │   ├── inmate/               # Inmate portal screens (Home, Catalog, Cart, Orders, Balance)
 │   │   ├── family/               # Family portal screens (Search, Deposit, Packages, Receipts)
 │   │   ├── warehouse/            # Warehouse screens (Queue, Picking, Inventory, Manifests)
@@ -114,7 +114,7 @@ This launches:
 ---
 
 ## 🔒 Security & Privacy Notice
-- Never store raw payment card data (all transactions routed through TouchPay electronic gateway).
+- Never store raw payment card data (all transactions routed through Stripe and PayPal electronic gateways).
 - Passwords and inmate PINs are hashed using `bcryptjs` with salt factor 10.
 - All administrative and financial ledger movements are written to the `AuditLog` table with PII automatically redacted.
 

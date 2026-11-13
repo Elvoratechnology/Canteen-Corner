@@ -23,7 +23,7 @@
 ### 1.3 Family Product Catalog Isolation
 - [x] **Cross-Facility Leakage Blocked**: `products_select_active` requires family users to possess an approved link (`family_offender_links`) matching the product's facility before viewing facility-specific products. Global staples remain accessible (`facility_id IS NULL`).
 
-### 1.4 TouchPay Server-Side Verification Gate
+### 1.4 Payment Gateway Server-Side Verification Gate
 - [x] **Exclusive Service Role Access**: `process_confirmed_touchpay_deposit` enforces `auth.role() = 'service_role'`. Execution is revoked from `PUBLIC`, `anon`, and `authenticated`.
 - [x] **Cryptographic Webhook Verification**: Gateway payload `amount`, `currency = 'USD'`, `idempotency_key`, and `provider_ref` are checked against the recorded `PENDING` deposit.
 - [x] **Fraud Abort & Audit Trail**: Mismatched amounts cause the deposit to fail and write a high-severity alert to `audit_logs`.
@@ -49,7 +49,7 @@
 ---
 
 ## 3. Financial Integrity & Transaction Protection
-- [x] **TouchPay Exclusivity**: TouchPay is the sole accepted payment method. Raw credit card and PayPal inputs are rejected.
+- [x] **Verified Gateway Providers**: Stripe and PayPal are the accepted electronic payment providers with server-side webhook cryptographic validation.
 - [x] **Atomic Order Placement RPC**: `public.place_inmate_order()` executes in an atomic transaction:
   1. Validates catalog stock and facility authorization.
   2. Verifies available trust fund balance.
@@ -75,7 +75,7 @@ While PostgreSQL RLS, triggers, and stored procedures guarantee data-at-rest int
 
 | Threat / Control | Layer | Required Implementation |
 |---|---|---|
-| **Webhook Signature Forgery** | Application Layer (`/api/payments/touchpay/webhook`) | The backend route must compute and verify the `HMAC-SHA256` signature using `TOUCHPAY_WEBHOOK_SECRET` before invoking `process_confirmed_touchpay_deposit`. SQL cannot verify raw HTTP request headers. |
+| **Webhook Signature Forgery** | Application Layer (`/api/payments/{stripe,paypal}/webhook`) | The backend routes must compute and verify cryptographic HMAC SHA-256 signatures (`stripe-signature` / PayPal transmission headers) before invoking confirmation. SQL cannot verify raw HTTP request headers. |
 | **Kiosk Session Abandonment & Shoulder Surfing** | Physical & Client Layer | Inmate kiosks run on shared hardware in housing units. The kiosk client must enforce an aggressive idle timeout (max 3 minutes of inactivity) that clears cookies/session tokens and wipes the DOM. |
 | **Distributed Brute-Force & Denial of Service** | Network / Edge Gateway | While SQL locks out an inmate ID after 3 failed attempts, distributed credential stuffing on login endpoints (`/api/auth/*`) must be throttled by an edge WAF (e.g. Cloudflare / Supabase Kong) using IP-based and user-agent rate limiting. |
 | **Service Role Secret Compromise** | Secret Management / CI/CD | `SUPABASE_SERVICE_ROLE_KEY` bypasses all Row Level Security. It must never appear in repository commits, `.env` files committed to Git, or client-side JavaScript bundles. Any rotation of this key requires updating server environment secrets immediately. |

@@ -75,7 +75,7 @@ export default function FamilyLoginPage() {
             Family & Friends Portal
           </span>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-            Send Trust Deposits strictly via TouchPay &bull; Safe & Secure
+            Send Trust Deposits via Stripe & PayPal &bull; Safe & Secure
           </p>
         </div>
 

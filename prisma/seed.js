@@ -71,8 +71,8 @@ async function main() {
       balanceBefore: 0.0,
       balanceAfter: 82.50,
       referenceType: 'DEPOSIT',
-      referenceId: 'TP-INIT-8250',
-      description: 'Initial commissary account balance deposit via TouchPay',
+      referenceId: 'DEP-INIT-8250',
+      description: 'Initial commissary account balance deposit via electronic payment',
       createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
     },
   });
@@ -249,7 +249,7 @@ async function main() {
 
   // Past deposit from family member
   await prisma.deposit.upsert({
-    where: { providerRef: 'TP-982412' },
+    where: { providerRef: 'cs_init_982412' },
     update: {},
     create: {
       offenderId: offender.id,
@@ -257,10 +257,10 @@ async function main() {
       amount: 50.00,
       fee: 3.50,
       totalPaid: 53.50,
-      provider: 'TOUCHPAY',
-      providerRef: 'TP-982412',
+      provider: 'STRIPE',
+      providerRef: 'cs_init_982412',
       status: 'SUCCEEDED',
-      idempotencyKey: 'idemp-tp-982412',
+      idempotencyKey: 'idemp-init-982412',
       completedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
       createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
     },
@@ -311,7 +311,7 @@ async function main() {
       {
         offenderId: offender.id,
         type: 'DEPOSIT_RECEIVED',
-        title: 'Funds Received via TouchPay',
+        title: 'Funds Received via Stripe',
         message: 'A deposit of $50.00 from Sarah Smith has posted to your commissary account.',
         read: false,
         createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),

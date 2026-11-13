@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import prisma from '../src/lib/db';
 import { getPaymentProvider } from '../src/lib/payments';
 
-describe('Phase 3: TouchPay Payments & Family Portal Verification', () => {
+describe('Phase 3: Electronic Payments (Stripe/PayPal) & Family Portal Verification', () => {
   beforeEach(async () => {
     // Reset John Smith's balance
     await prisma.offender.update({
@@ -12,7 +12,7 @@ describe('Phase 3: TouchPay Payments & Family Portal Verification', () => {
     });
   });
 
-  it('should initialize a TouchPay intent with PENDING status and valid provider reference', async () => {
+  it('should initialize a payment intent with PENDING status and valid provider reference', async () => {
     const provider = getPaymentProvider();
     const familyUser = await prisma.user.findUniqueOrThrow({
       where: { email: 'family@canteen.local' },
@@ -28,7 +28,7 @@ describe('Phase 3: TouchPay Payments & Family Portal Verification', () => {
       customerEmail: 'family@canteen.local',
     });
 
-    expect(intent.providerRef).toMatch(/^TP-\d+$/);
+    expect(intent.providerRef).toMatch(/^(cs_test_|cs_live_)/);
     expect(intent.status).toBe('PENDING');
     expect(intent.amount).toBe(50.00);
     expect(intent.fee).toBe(3.50);
@@ -131,57 +131,61 @@ describe('Phase 3: TouchPay Payments & Family Portal Verification', () => {
     expect(deposit.status).toBe('FAILED');
   });
 
-  it('should verify TouchPay webhook signatures cryptographically and reject tampering', async () => {
+  it('should verify payment webhook signatures cryptographically and reject tampering', async () => {
     const provider = getPaymentProvider();
-    const secret = process.env.TOUCHPAY_WEBHOOK_SECRET || 'tp_whsec_mock_canteen_corner_verification_sig';
+    const secret = process.env.STRIPE_WEBHOOK_SECRET || 'whsec_test_mock_secret_key_12345';
 
     const validPayload = JSON.stringify({
-      event: 'payment.succeeded',
-      providerRef: 'TP-999999',
-      idempotencyKey: 'idemp-hook-1',
-      amount: 25.00,
-      fee: 3.50,
-      totalPaid: 28.50,
-      offenderId: 'A1234567',
-      timestamp: new Date().toISOString(),
+      id: 'evt_test_12345',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: 'cs_test_mock_123',
+          payment_status: 'paid',
+          amount_total: 2500,
+          metadata: {
+            depositId: 'dep-123',
+            offenderId: 'A1234567',
+            idempotencyKey: 'idemp-hook-1',
+          },
+        },
+      },
     });
 
-    const nowTimestamp = Date.now().toString();
-    const validSig = crypto.createHmac('sha256', secret).update(validPayload).digest('hex');
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const validSig = crypto.createHmac('sha256', secret).update(`${nowSeconds}.${validPayload}`).digest('hex');
 
     // 1. Valid webhook
     const validResult = await provider.verifyWebhook(
       {
-        'x-touchpay-signature': validSig,
-        'x-touchpay-timestamp': nowTimestamp,
+        'stripe-signature': `t=${nowSeconds},v1=${validSig}`,
       },
       validPayload
     );
     expect(validResult.valid).toBe(true);
-    expect(validResult.payload?.providerRef).toBe('TP-999999');
+    expect(validResult.payload?.providerRef).toBe('cs_test_mock_123');
 
     // 2. Tampered signature
     const invalidResult = await provider.verifyWebhook(
       {
-        'x-touchpay-signature': '0000000000000000000000000000000000000000000000000000000000000000',
-        'x-touchpay-timestamp': nowTimestamp,
+        'stripe-signature': `t=${nowSeconds},v1=0000000000000000000000000000000000000000000000000000000000000000`,
       },
       validPayload
     );
     expect(invalidResult.valid).toBe(false);
-    expect(invalidResult.error).toContain('Invalid HMAC');
+    expect(invalidResult.error).toContain('Invalid Stripe HMAC');
 
     // 3. Missing signature
     const missingSigResult = await provider.verifyWebhook({}, validPayload);
     expect(missingSigResult.valid).toBe(false);
-    expect(missingSigResult.error).toContain('Missing');
+    expect(missingSigResult.error).toContain('Missing stripe-signature header');
 
     // 4. Expired timestamp (> 5 minutes ago)
-    const oldTimestamp = (Date.now() - 10 * 60 * 1000).toString();
+    const oldSeconds = nowSeconds - 600;
+    const expiredSig = crypto.createHmac('sha256', secret).update(`${oldSeconds}.${validPayload}`).digest('hex');
     const expiredResult = await provider.verifyWebhook(
       {
-        'x-touchpay-signature': validSig,
-        'x-touchpay-timestamp': oldTimestamp,
+        'stripe-signature': `t=${oldSeconds},v1=${expiredSig}`,
       },
       validPayload
     );
@@ -189,4 +193,3 @@ describe('Phase 3: TouchPay Payments & Family Portal Verification', () => {
     expect(expiredResult.error).toContain('replay protection window');
   });
 });
-

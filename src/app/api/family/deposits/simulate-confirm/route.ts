@@ -10,7 +10,7 @@ const ConfirmSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
-    // Return 404 in production regardless of ENABLE_TOUCHPAY_SIMULATION
+    // Return 404 in production to completely disable simulation endpoints
     if (process.env.NODE_ENV === 'production') {
       return NextResponse.json({ error: 'Not Found' }, { status: 404 });
     }
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const provider = getPaymentProvider();
+    const provider = getPaymentProvider(deposit.provider.toLowerCase() as any);
     const confirmation = await provider.processPaymentConfirmation(
       providerRef,
       deposit.idempotencyKey

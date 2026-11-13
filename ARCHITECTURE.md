@@ -10,7 +10,7 @@
 | Portal | Target Audience | Authentication Mechanism | Primary Responsibilities |
 | :--- | :--- | :--- | :--- |
 | **Inmate Portal** | Incarcerated individuals (Tablets / Shared Kiosks) | Offender ID (`A1234567`) + numeric PIN (`1234`) | Commissary catalog shopping, live trust balance & weekly limit checks, atomic order submission, order history, notification inbox. 30-min auto-logout kiosk timer. |
-| **Family & Friends Portal** | Approved family & verified sponsors | Email + Password (Bcrypt) + Account Verification | Offender search, instant commissary fund deposits powered strictly by TouchPay, care gift packages subject to facility approval, audit receipts. |
+| **Family & Friends Portal** | Approved family & verified sponsors | Email + Password (Bcrypt) + Account Verification | Offender search, instant commissary fund deposits powered by Stripe & PayPal, care gift packages subject to facility approval, audit receipts. |
 | **Warehouse Portal** | Institutional fulfillment staff (Pickers & Supervisors) | Staff ID (`STF-01` / `STF-02`) or Email + Password | Incoming fulfillment queue, split-screen picking sheet, barcode/camera order packaging, inventory shortage tracking, delivery manifest generation (PDF/CSV). |
 
 ---
@@ -30,7 +30,7 @@ flowchart TD
         InmateAPI["/api/inmate/*<br/>(Catalog, Orders, Ledger, Notifications)"]
         FamilyAPI["/api/family/*<br/>(Search, Deposits, Gift Packages)"]
         WarehouseAPI["/api/warehouse/*<br/>(Queue, Picking, Restock, Manifests)"]
-        PaymentAPI["/api/payments/touchpay/*<br/>(Webhook, Idempotency, Verification)"]
+        PaymentAPI["/api/payments/{stripe,paypal}/*<br/>(Webhook, Idempotency, Verification)"]
         AuditService["Audit Logger<br/>(PII-Redacted Institutional Logs)"]
     end
 
@@ -38,7 +38,7 @@ flowchart TD
         TxEngine["Prisma Atomic $transaction Engine"]
         RuleChecker["Spending Limit & Balance Reconciler"]
         StockEngine["Inventory & Shortage Tracker"]
-        TouchPayProvider["TouchPay Payment Provider<br/>(Pending -> Succeeded State Machine)"]
+        PaymentProviders["Stripe & PayPal Providers<br/>(Shared Confirmation Engine)"]
     end
 
     subgraph Persistence ["Persistence & Institutional Ledger"]
@@ -58,9 +58,9 @@ flowchart TD
 
     InmateAPI --> TxEngine
     WarehouseAPI --> StockEngine
-    PaymentAPI --> TouchPayProvider
+    PaymentAPI --> PaymentProviders
 
-    TouchPayProvider --> TxEngine
+    PaymentProviders --> TxEngine
     TxEngine --> RuleChecker
     TxEngine --> Ledger
     TxEngine --> DB
@@ -78,20 +78,22 @@ To eliminate trust fund balance discrepancies and ensure full audit compliance:
    - `credit`: exact deposited funds
    - `balanceBefore`: verified snapshot prior to transaction
    - `balanceAfter`: verified post-transaction state
-   - `referenceType` & `referenceId`: links directly to `#CC-xxxxx` order or `TP-xxxxxx` TouchPay deposit
+   - `referenceType` & `referenceId`: links directly to `#CC-xxxxx` order or deposit reference
 3. Invariant formula enforced by database transaction:
    $$\text{balanceAfter} = \text{balanceBefore} + \text{credit} - \text{debit}$$
 
 ---
 
-## 5. TouchPay Payments Architecture
-Per correctional facility mandates, **all other payment methods are excluded** (no raw card capture, no PayPal):
+## 5. Stripe & PayPal Payments Architecture
+Supported payment methods include Credit/Debit Cards (Stripe) and PayPal institutional deposits:
 - `IPaymentProvider` interface defines contract: `createPaymentIntent`, `verifyWebhook`, `processPaymentConfirmation`, `getPaymentStatus`.
 - Implementations:
-  - `TouchPayProvider`: Signed HTTP payloads and HMAC SHA256 webhook signatures.
-  - `MockTouchPayProvider`: Local zero-friction developer & automated test execution.
-- Inmate accounts are credited **strictly** upon verified `payment.succeeded` webhook confirmation.
-- Idempotency key tracking (`Deposit.idempotencyKey`) ensures repeat webhook deliveries never double-credit inmate accounts.
+  - `StripeProvider`: Stripe Checkout Sessions, PaymentIntents, and HMAC SHA256 `stripe-signature` verification.
+  - `PayPalProvider`: PayPal v2 Orders API, payment capture, and cryptographic transmission webhook verification.
+- **Shared Confirmation Engine** (`confirmation.ts`):
+  - Validates amount, currency ('USD'), idempotency key, and facility deposit limit.
+  - Inmate accounts are credited **strictly** upon verified webhook confirmation through Supabase atomic RPC in production or Prisma interactive transaction in local dev.
+  - Idempotency key tracking (`Deposit.idempotencyKey`) ensures repeat webhook deliveries never double-credit inmate accounts.
 
 ---
 

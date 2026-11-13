@@ -49,7 +49,7 @@ export default function ReentryRewardsPage() {
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60">
             <Heart className="w-5 h-5 text-teal-500 mb-2" />
             <h4 className="text-xs font-bold text-slate-900 dark:text-white">Family Bonus</h4>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">Zero TouchPay processing fees on family deposit matches.</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">Zero processing fees on family deposit matches.</p>
           </div>
         </div>
 

@@ -1,31 +1,27 @@
-import { IPaymentProvider } from './types';
-import { MockTouchPayProvider } from './MockTouchPayProvider';
-import { TouchPayProvider } from './TouchPayProvider';
+import { IPaymentProvider, SupportedPaymentProvider } from './types';
+import { StripeProvider } from './StripeProvider';
+import { PayPalProvider } from './PayPalProvider';
 
-let paymentProviderInstance: IPaymentProvider | null = null;
+/**
+ * Payment provider factory and registry.
+ * Supports Stripe (Credit/Debit cards) and PayPal (Institutional e-wallet deposits).
+ */
+export function getPaymentProvider(
+  providerName: SupportedPaymentProvider | 'stripe' | 'paypal' = 'STRIPE'
+): IPaymentProvider {
+  const normalized = providerName.toUpperCase();
 
-export function getPaymentProvider(): IPaymentProvider {
-  if (!paymentProviderInstance) {
-    const isProduction = process.env.NODE_ENV === 'production';
-    const providerType = process.env.TOUCHPAY_PROVIDER_TYPE;
-
-    // Strict Production Gate: In production, always instantiate TouchPayProvider.
-    // If TOUCHPAY_PROVIDER_TYPE=mock in production, throw an explicit security error.
-    if (isProduction) {
-      if (providerType === 'mock') {
-        throw new Error(
-          'Security Configuration Error: MockTouchPayProvider cannot be instantiated when NODE_ENV is production.'
-        );
-      }
-      paymentProviderInstance = new TouchPayProvider();
-    } else if (providerType === 'touchpay') {
-      paymentProviderInstance = new TouchPayProvider();
-    } else {
-      paymentProviderInstance = new MockTouchPayProvider();
-    }
+  if (normalized === 'PAYPAL') {
+    return new PayPalProvider();
   }
-  return paymentProviderInstance;
+
+  // Default to Stripe for card payments
+  return new StripeProvider();
 }
 
-export default getPaymentProvider;
+export { StripeProvider } from './StripeProvider';
+export { PayPalProvider } from './PayPalProvider';
+export * from './types';
+export * from './confirmation';
 
+export default getPaymentProvider;

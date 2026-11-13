@@ -69,7 +69,7 @@ export default function FamilyRegisterPage() {
             Create Family Account
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Deposit commissary funds directly to inmates via TouchPay
+            Deposit commissary funds directly to inmates via Stripe & PayPal
           </p>
         </div>
 

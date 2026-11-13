@@ -13,10 +13,11 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres_secure_2026@db:5432/canteen_corner?schema=public
       - JWT_SECRET=${JWT_SECRET}
       - NODE_ENV=production
-      - TOUCHPAY_PROVIDER_TYPE=mock
-      - TOUCHPAY_API_KEY=tp_live_key_canteen_987421
-      - TOUCHPAY_WEBHOOK_SECRET=tp_whsec_mock_canteen_corner_verification_sig
-      - TOUCHPAY_FACILITY_ID=FACILITY_CC_01
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID}
+      - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET}
+      - PAYPAL_WEBHOOK_ID=${PAYPAL_WEBHOOK_ID}
       - WEEKLY_RESET_DAY=0
       - DEFAULT_WEEKLY_LIMIT=100.00
     depends_on:

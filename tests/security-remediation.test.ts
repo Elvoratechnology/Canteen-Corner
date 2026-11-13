@@ -315,7 +315,7 @@ describe('Critical Application Security Remediation Suite', () => {
 
       expect(res.status).toBe(200);
       expect(data.success).toBe(true);
-      expect(data.intent.providerRef).toMatch(/^TP-\d+$/);
+      expect(data.intent.providerRef).toMatch(/^(cs_|PAYID-|ORDER-)/);
 
       // Cleanup
       await prisma.deposit.delete({ where: { providerRef: data.intent.providerRef } });
@@ -523,19 +523,20 @@ describe('Critical Application Security Remediation Suite', () => {
   });
 
   // =========================================================================
-  // Finding 6: TouchPay Simulation Rejection in Production
+  // Finding 6: Payment Simulation Rejection in Production
   // =========================================================================
-  describe('6. TouchPay Simulation Production Protection', () => {
+  describe('6. Payment Simulation Production Protection', () => {
     const originalEnv = process.env.NODE_ENV;
 
-    it('should return 404 in production regardless of ENABLE_TOUCHPAY_SIMULATION flag', async () => {
+    it('should return 404 in production regardless of simulation flags', async () => {
       process.env.NODE_ENV = 'production';
+      process.env.ENABLE_PAYMENT_SIMULATION = 'true';
       process.env.ENABLE_TOUCHPAY_SIMULATION = 'true';
 
       const req = new NextRequest('http://localhost:3000/api/family/deposits/simulate-confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providerRef: 'TP-123456' }),
+        body: JSON.stringify({ providerRef: 'SIM-123456' }),
       });
 
       const res = await simulateDepositConfirm(req);
@@ -545,6 +546,7 @@ describe('Critical Application Security Remediation Suite', () => {
       expect(data.error).toBe('Not Found');
 
       process.env.NODE_ENV = originalEnv;
+      delete process.env.ENABLE_PAYMENT_SIMULATION;
       delete process.env.ENABLE_TOUCHPAY_SIMULATION;
     });
   });

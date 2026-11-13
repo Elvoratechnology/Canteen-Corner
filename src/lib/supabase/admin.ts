@@ -6,7 +6,7 @@ import { createClient } from '@supabase/supabase-js';
  * SECURITY MANDATES:
  * 1. This client bypasses Row Level Security (RLS) using SUPABASE_SERVICE_ROLE_KEY.
  * 2. It MUST ONLY be imported in trusted, server-side backend operations
- *    (e.g., verifying cryptographic TouchPay payment gateway webhooks, background schedulers).
+ *    (e.g., verifying cryptographic payment gateway webhooks, background schedulers).
  * 3. NEVER expose SUPABASE_SERVICE_ROLE_KEY to the browser or prefix with NEXT_PUBLIC_.
  */
 export function createAdminClient() {

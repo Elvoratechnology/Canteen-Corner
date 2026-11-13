@@ -7,6 +7,7 @@ import { z } from 'zod';
 const DepositIntentSchema = z.object({
   offenderId: z.string().min(1, 'Offender ID is required'),
   amount: z.number().positive('Deposit amount must be positive').max(300, 'Maximum single deposit is $300.00'),
+  provider: z.enum(['stripe', 'paypal', 'STRIPE', 'PAYPAL']).optional().default('stripe'),
 });
 
 export async function POST(req: NextRequest) {
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { offenderId, amount } = result.data;
+    const { offenderId, amount, provider: chosenProvider } = result.data;
 
     const offender = await prisma.offender.findUnique({
       where: { id: offenderId },
@@ -69,14 +70,15 @@ export async function POST(req: NextRequest) {
     }
 
     const idempotencyKey = `idemp-${offender.id}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-    const provider = getPaymentProvider();
+    const provider = getPaymentProvider(chosenProvider as any);
 
     const intent = await provider.createPaymentIntent({
       amount,
       offenderId: offender.id,
       familyAccountId: familyAccount?.id,
       idempotencyKey,
-      customerEmail: session.email || 'customer@touchpay.direct',
+      customerEmail: session.email || 'customer@canteen.local',
+      provider: provider.providerName,
     });
 
     return NextResponse.json({
@@ -91,7 +93,7 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error('Error creating deposit intent:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to initialize TouchPay deposit.' },
+      { error: error.message || 'Failed to initialize electronic deposit.' },
       { status: 500 }
     );
   }

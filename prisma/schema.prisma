@@ -151,7 +151,8 @@ model Deposit {
   amount          Float
   fee             Float          @default(0.0)
   totalPaid       Float
-  provider        String         @default("TOUCHPAY")
+  currency        String         @default("USD")
+  provider        String         @default("STRIPE") // STRIPE or PAYPAL
   providerRef     String         @unique
   status          String         @default("PENDING") // PENDING, SUCCEEDED, FAILED
   idempotencyKey  String         @unique

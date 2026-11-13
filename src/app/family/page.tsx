@@ -55,7 +55,7 @@ export default function FamilyDepositFundsPage() {
     maxDepositAmount: 300,
   });
 
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'touchpay' | 'card' | 'paypal' | 'other'>('touchpay');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'card' | 'paypal'>('card');
   const [selectedPreset, setSelectedPreset] = useState<number | null>(50);
   const [customAmount, setCustomAmount] = useState<string>('');
   const [depositLoading, setDepositLoading] = useState(false);
@@ -118,12 +118,13 @@ export default function FamilyDepositFundsPage() {
         body: JSON.stringify({
           offenderId: selectedOffender.id,
           amount,
+          provider: selectedPaymentMethod === 'paypal' ? 'paypal' : 'stripe',
         }),
       });
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to initialize TouchPay deposit');
+        throw new Error(data.error || 'Failed to initialize deposit');
       }
 
       setPendingIntent(data.intent);
@@ -255,11 +256,10 @@ export default function FamilyDepositFundsPage() {
                   setSelectedPreset(amt);
                   setCustomAmount('');
                 }}
-                className={`py-3 rounded-2xl font-mono text-base font-bold border transition-all ${
-                  isSelected
+                className={`py-3 rounded-2xl font-mono text-base font-bold border transition-all ${isSelected
                     ? 'bg-teal-500 dark:bg-[#00dfa2] text-white dark:text-[#042f2e] border-teal-500 dark:border-[#00dfa2] shadow-sm'
                     : 'bg-slate-50 dark:bg-[#181818]/40 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-[#262626] hover:border-teal-500'
-                }`}
+                  }`}
               >
                 ${amt}.00
               </button>
@@ -299,7 +299,7 @@ export default function FamilyDepositFundsPage() {
             </span>
           </div>
           <div className="flex justify-between text-slate-600 dark:text-slate-400">
-            <span>TouchPay Electronic Processing Fee:</span>
+            <span>Electronic Processing Fee:</span>
             <span className="font-mono text-slate-900 dark:text-white">$3.50</span>
           </div>
           <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex justify-between font-bold text-sm text-slate-900 dark:text-white">
@@ -317,261 +317,245 @@ export default function FamilyDepositFundsPage() {
           Select Payment Method
         </span>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {/* 1. Credit / Debit Card */}
+        <div className="grid grid-cols-2 gap-3">
+          {/* 1. Credit / Debit Card (Stripe) */}
           <div
             onClick={() => setSelectedPaymentMethod('card')}
-            className={`p-4 rounded-3xl cursor-pointer border transition-all flex flex-col items-center text-center justify-between min-h-[110px] bg-white dark:bg-[#121212] ${
-              selectedPaymentMethod === 'card'
+            className={`p-4 rounded-3xl cursor-pointer border transition-all flex flex-col items-center text-center justify-between min-h-[110px] bg-white dark:bg-[#121212] ${selectedPaymentMethod === 'card'
                 ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-sm'
                 : 'border-slate-200 dark:border-[#262626] hover:border-slate-400 text-slate-700 dark:text-slate-300'
-            }`}
+              }`}
           >
             <div className="w-10 h-10 rounded-2xl bg-slate-100 dark:bg-[#181818] text-blue-500 flex items-center justify-center">
               <CreditCard className="w-5 h-5" />
             </div>
-            <span className="text-xs font-bold leading-tight mt-2 text-slate-900 dark:text-white">
-              Credit / Debit Card
-            </span>
+            <div>
+              <span className="text-xs font-bold leading-tight block text-slate-900 dark:text-white">
+                Credit / Debit Card
+              </span>
+              <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold block">
+                Powered by Stripe
+              </span>
+            </div>
           </div>
 
           {/* 2. PayPal */}
           <div
             onClick={() => setSelectedPaymentMethod('paypal')}
-            className={`p-4 rounded-3xl cursor-pointer border transition-all flex flex-col items-center text-center justify-between min-h-[110px] bg-white dark:bg-[#121212] ${
-              selectedPaymentMethod === 'paypal'
+            className={`p-4 rounded-3xl cursor-pointer border transition-all flex flex-col items-center text-center justify-between min-h-[110px] bg-white dark:bg-[#121212] ${selectedPaymentMethod === 'paypal'
                 ? 'border-blue-600 ring-2 ring-blue-600/20 shadow-sm'
                 : 'border-slate-200 dark:border-[#262626] hover:border-slate-400 text-slate-700 dark:text-slate-300'
-            }`}
+              }`}
           >
             <div className="w-10 h-10 rounded-2xl bg-slate-100 dark:bg-[#181818] text-blue-600 flex items-center justify-center font-black text-lg font-serif">
               P
             </div>
-            <span className="text-xs font-bold leading-tight mt-2 text-slate-900 dark:text-white">
-              PayPal
-            </span>
-          </div>
-
-          {/* 3. TouchPay (Official Facility Gateway - Clean Light / Dark background) */}
-          <div
-            onClick={() => setSelectedPaymentMethod('touchpay')}
-            className={`p-4 rounded-3xl cursor-pointer border transition-all flex flex-col items-center text-center justify-between min-h-[110px] bg-white dark:bg-[#121212] ${
-              selectedPaymentMethod === 'touchpay'
-                ? 'border-teal-500 ring-2 ring-teal-500/30 shadow-sm'
-                : 'border-slate-200 dark:border-[#262626] hover:border-teal-500 text-slate-700 dark:text-slate-300'
-            }`}
-          >
-            <div className="w-10 h-10 rounded-2xl bg-slate-100 dark:bg-[#181818] text-teal-500 flex items-center justify-center">
-              <Building className="w-5 h-5" />
-            </div>
             <div>
               <span className="text-xs font-bold leading-tight block text-slate-900 dark:text-white">
-                TouchPay
+                PayPal
               </span>
-              <span className="text-[10px] text-teal-600 dark:text-teal-400 font-semibold block">
-                Official Gateway
+              <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold block">
+                Instant Transfer
               </span>
             </div>
           </div>
+        </div>
+        <div className="w-10 h-10 rounded-2xl bg-slate-100 dark:bg-[#181818] text-purple-500 flex items-center justify-center">
+          <MoreHorizontal className="w-5 h-5" />
+        </div>
+        <span className="text-xs font-bold leading-tight mt-2 text-slate-900 dark:text-white">
+          Other Methods
+        </span>
+      </div>
+    </div>
+      </div >
 
-          {/* 4. Other Methods */}
-          <div
-            onClick={() => setSelectedPaymentMethod('other')}
-            className={`p-4 rounded-3xl cursor-pointer border transition-all flex flex-col items-center text-center justify-between min-h-[110px] bg-white dark:bg-[#121212] ${
-              selectedPaymentMethod === 'other'
-                ? 'border-purple-500 ring-2 ring-purple-500/20 shadow-sm'
-                : 'border-slate-200 dark:border-[#262626] hover:border-slate-400 text-slate-700 dark:text-slate-300'
-            }`}
-          >
-            <div className="w-10 h-10 rounded-2xl bg-slate-100 dark:bg-[#181818] text-purple-500 flex items-center justify-center">
-              <MoreHorizontal className="w-5 h-5" />
-            </div>
-            <span className="text-xs font-bold leading-tight mt-2 text-slate-900 dark:text-white">
-              Other Methods
+    { depositError && (
+      <div className="p-3.5 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 text-xs flex items-center gap-2">
+        <AlertCircle className="w-4 h-4 shrink-0" />
+        <span>{depositError}</span>
+      </div>
+    )
+}
+
+{/* Big Full-Width Teal Action Button (Matching Image 2 Screen 2) */ }
+<button
+  type="button"
+  onClick={handleContinuePayment}
+  disabled={depositLoading || getEffectiveAmount() <= 0}
+  className="w-full py-4 rounded-2xl bg-teal-500 dark:bg-[#00dfa2] text-white dark:text-[#042f2e] font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-md hover:opacity-95 active:scale-[0.99] transition-all disabled:opacity-50"
+>
+  {depositLoading ? (
+    <Loader2 className="w-5 h-5 animate-spin" />
+  ) : (
+    <>
+      <Lock className="w-4 h-4" />
+      <span>Continue to Payment</span>
+      <ArrowRight className="w-4 h-4 ml-1" />
+    </>
+  )}
+</button>
+
+{/* Details Modal */ }
+{
+  showDetailsModal && selectedOffender && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="bg-white dark:bg-[#121212] w-full max-w-sm p-6 rounded-3xl border border-slate-200 dark:border-[#262626] space-y-4 shadow-xl">
+        <h3 className="text-base font-bold text-slate-900 dark:text-white">
+          Inmate Account Verification
+        </h3>
+        <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300">
+          <div className="flex justify-between py-1 border-b border-slate-100 dark:border-[#262626]">
+            <span>Full Name:</span>
+            <strong className="text-slate-900 dark:text-white">{selectedOffender.name}</strong>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-100 dark:border-[#262626]">
+            <span>Offender ID:</span>
+            <strong className="font-mono text-teal-600 dark:text-teal-400">{selectedOffender.id}</strong>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-100 dark:border-[#262626]">
+            <span>Assigned Unit:</span>
+            <span>{selectedOffender.unit}</span>
+          </div>
+          <div className="flex justify-between py-1 border-b border-slate-100 dark:border-[#262626]">
+            <span>Cell Housing:</span>
+            <span>{selectedOffender.housing}</span>
+          </div>
+          <div className="flex justify-between py-1">
+            <span>Max Single Deposit:</span>
+            <span className="font-mono font-bold">${selectedOffender.maxDepositAmount.toFixed(2)}</span>
+          </div>
+        </div>
+        <button
+          onClick={() => setShowDetailsModal(false)}
+          className="btn-teal w-full py-2.5 rounded-xl text-xs font-bold"
+        >
+          Close Details
+        </button>
+      </div>
+    </div>
+  )
+}
+
+{/* Checkout Simulator Modal */ }
+{
+  pendingIntent && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="bg-white dark:bg-[#121212] w-full max-w-md p-6 sm:p-8 rounded-3xl border border-slate-200 dark:border-[#262626] shadow-xl space-y-5">
+        <div className="text-center">
+          <div className="w-12 h-12 rounded-2xl bg-teal-500/20 text-teal-600 dark:text-teal-400 flex items-center justify-center mx-auto mb-2">
+            <Building className="w-6 h-6" />
+          </div>
+          <span className="text-[11px] font-mono text-teal-600 dark:text-teal-400 font-bold uppercase tracking-wider block">
+            Electronic Deposit Checkout
+          </span>
+          <h3 className="text-lg font-bold text-slate-900 dark:text-white mt-1">
+            Authorize Deposit for {selectedOffender?.name}
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
+            Ref: {pendingIntent.providerRef}
+          </p>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-[#181818]/50 border border-slate-200 dark:border-[#262626] text-xs space-y-2">
+          <div className="flex justify-between">
+            <span className="text-slate-500 dark:text-slate-400">Deposit Amount:</span>
+            <span className="font-mono font-bold text-slate-900 dark:text-white">
+              ${pendingIntent.amount.toFixed(2)}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500 dark:text-slate-400">Processing Fee:</span>
+            <span className="font-mono text-slate-900 dark:text-white">
+              ${pendingIntent.fee.toFixed(2)}
+            </span>
+          </div>
+          <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex justify-between font-bold text-sm">
+            <span className="text-slate-800 dark:text-slate-200">Total Charged:</span>
+            <span className="font-mono text-teal-600 dark:text-teal-400">
+              ${pendingIntent.totalPaid.toFixed(2)}
             </span>
           </div>
         </div>
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleConfirmPayment}
+            disabled={depositLoading}
+            className="btn-teal w-full py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-1.5"
+          >
+            {depositLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Confirm & Authorize</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPendingIntent(null)}
+            className="px-4 py-3 rounded-2xl bg-slate-100 dark:bg-[#181818] text-slate-600 dark:text-slate-300 text-xs font-semibold"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
-
-      {depositError && (
-        <div className="p-3.5 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 text-xs flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          <span>{depositError}</span>
-        </div>
-      )}
-
-      {/* Big Full-Width Teal Action Button (Matching Image 2 Screen 2) */}
-      <button
-        type="button"
-        onClick={handleContinuePayment}
-        disabled={depositLoading || getEffectiveAmount() <= 0}
-        className="w-full py-4 rounded-2xl bg-teal-500 dark:bg-[#00dfa2] text-white dark:text-[#042f2e] font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-md hover:opacity-95 active:scale-[0.99] transition-all disabled:opacity-50"
-      >
-        {depositLoading ? (
-          <Loader2 className="w-5 h-5 animate-spin" />
-        ) : (
-          <>
-            <Lock className="w-4 h-4" />
-            <span>Continue to Payment</span>
-            <ArrowRight className="w-4 h-4 ml-1" />
-          </>
-        )}
-      </button>
-
-      {/* Details Modal */}
-      {showDetailsModal && selectedOffender && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="bg-white dark:bg-[#121212] w-full max-w-sm p-6 rounded-3xl border border-slate-200 dark:border-[#262626] space-y-4 shadow-xl">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">
-              Inmate Account Verification
-            </h3>
-            <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300">
-              <div className="flex justify-between py-1 border-b border-slate-100 dark:border-[#262626]">
-                <span>Full Name:</span>
-                <strong className="text-slate-900 dark:text-white">{selectedOffender.name}</strong>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-100 dark:border-[#262626]">
-                <span>Offender ID:</span>
-                <strong className="font-mono text-teal-600 dark:text-teal-400">{selectedOffender.id}</strong>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-100 dark:border-[#262626]">
-                <span>Assigned Unit:</span>
-                <span>{selectedOffender.unit}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-100 dark:border-[#262626]">
-                <span>Cell Housing:</span>
-                <span>{selectedOffender.housing}</span>
-              </div>
-              <div className="flex justify-between py-1">
-                <span>Max Single Deposit:</span>
-                <span className="font-mono font-bold">${selectedOffender.maxDepositAmount.toFixed(2)}</span>
-              </div>
-            </div>
-            <button
-              onClick={() => setShowDetailsModal(false)}
-              className="btn-teal w-full py-2.5 rounded-xl text-xs font-bold"
-            >
-              Close Details
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Checkout Simulator Modal */}
-      {pendingIntent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="bg-white dark:bg-[#121212] w-full max-w-md p-6 sm:p-8 rounded-3xl border border-slate-200 dark:border-[#262626] shadow-xl space-y-5">
-            <div className="text-center">
-              <div className="w-12 h-12 rounded-2xl bg-teal-500/20 text-teal-600 dark:text-teal-400 flex items-center justify-center mx-auto mb-2">
-                <Building className="w-6 h-6" />
-              </div>
-              <span className="text-[11px] font-mono text-teal-600 dark:text-teal-400 font-bold uppercase tracking-wider block">
-                TouchPay Direct Electronic Gate
-              </span>
-              <h3 className="text-lg font-bold text-slate-900 dark:text-white mt-1">
-                Authorize Deposit for {selectedOffender?.name}
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
-                Ref: {pendingIntent.providerRef}
-              </p>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-[#181818]/50 border border-slate-200 dark:border-[#262626] text-xs space-y-2">
-              <div className="flex justify-between">
-                <span className="text-slate-500 dark:text-slate-400">Deposit Amount:</span>
-                <span className="font-mono font-bold text-slate-900 dark:text-white">
-                  ${pendingIntent.amount.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500 dark:text-slate-400">Processing Fee:</span>
-                <span className="font-mono text-slate-900 dark:text-white">
-                  ${pendingIntent.fee.toFixed(2)}
-                </span>
-              </div>
-              <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex justify-between font-bold text-sm">
-                <span className="text-slate-800 dark:text-slate-200">Total Charged:</span>
-                <span className="font-mono text-teal-600 dark:text-teal-400">
-                  ${pendingIntent.totalPaid.toFixed(2)}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={handleConfirmPayment}
-                disabled={depositLoading}
-                className="btn-teal w-full py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-1.5"
-              >
-                {depositLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Confirm & Authorize</span>}
-              </button>
-              <button
-                type="button"
-                onClick={() => setPendingIntent(null)}
-                className="px-4 py-3 rounded-2xl bg-slate-100 dark:bg-[#181818] text-slate-600 dark:text-slate-300 text-xs font-semibold"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Receipt Modal */}
-      {receipt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
-          <div className="bg-white dark:bg-[#121212] w-full max-w-md p-6 sm:p-8 rounded-3xl border border-slate-200 dark:border-[#262626] shadow-xl text-center space-y-4">
-            <div className="w-14 h-14 rounded-full bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-sm">
-              <CheckCircle2 className="w-8 h-8" />
-            </div>
-
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-              Deposit Confirmed!
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-              TouchPay Ref: <strong className="text-teal-600 dark:text-teal-400">{receipt.providerRef}</strong>
-            </p>
-
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-[#181818]/50 border border-slate-200 dark:border-[#262626] text-left text-xs space-y-2">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Beneficiary:</span>
-                <span className="font-bold text-slate-900 dark:text-white">{receipt.offenderName} ({receipt.offenderId})</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Credited to Account:</span>
-                <span className="font-mono font-bold text-teal-600 dark:text-teal-400 text-sm">
-                  ${receipt.amount.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Fee:</span>
-                <span className="font-mono text-slate-700 dark:text-slate-300">${receipt.fee.toFixed(2)}</span>
-              </div>
-              <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex justify-between font-bold text-sm">
-                <span className="text-slate-800 dark:text-slate-200">Total Paid:</span>
-                <span className="font-mono text-slate-900 dark:text-white">${receipt.totalPaid.toFixed(2)}</span>
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => window.print()}
-                className="w-full py-2.5 rounded-xl bg-slate-100 dark:bg-[#181818] text-slate-800 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5"
-              >
-                <Printer className="w-4 h-4" />
-                <span>Print</span>
-              </button>
-              <button
-                onClick={() => setReceipt(null)}
-                className="btn-teal w-full py-2.5 rounded-xl text-xs font-bold"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
+  )
+}
+
+{/* Receipt Modal */ }
+{
+  receipt && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+      <div className="bg-white dark:bg-[#121212] w-full max-w-md p-6 sm:p-8 rounded-3xl border border-slate-200 dark:border-[#262626] shadow-xl text-center space-y-4">
+        <div className="w-14 h-14 rounded-full bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-sm">
+          <CheckCircle2 className="w-8 h-8" />
+        </div>
+
+        <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+          Deposit Confirmed!
+        </h2>
+        <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+          Reference: <strong className="text-teal-600 dark:text-teal-400">{receipt.providerRef}</strong>
+        </p>
+
+        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-[#181818]/50 border border-slate-200 dark:border-[#262626] text-left text-xs space-y-2">
+          <div className="flex justify-between">
+            <span className="text-slate-500">Beneficiary:</span>
+            <span className="font-bold text-slate-900 dark:text-white">{receipt.offenderName} ({receipt.offenderId})</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">Credited to Account:</span>
+            <span className="font-mono font-bold text-teal-600 dark:text-teal-400 text-sm">
+              ${receipt.amount.toFixed(2)}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">Fee:</span>
+            <span className="font-mono text-slate-700 dark:text-slate-300">${receipt.fee.toFixed(2)}</span>
+          </div>
+          <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex justify-between font-bold text-sm">
+            <span className="text-slate-800 dark:text-slate-200">Total Paid:</span>
+            <span className="font-mono text-slate-900 dark:text-white">${receipt.totalPaid.toFixed(2)}</span>
+          </div>
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => window.print()}
+            className="w-full py-2.5 rounded-xl bg-slate-100 dark:bg-[#181818] text-slate-800 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5"
+          >
+            <Printer className="w-4 h-4" />
+            <span>Print</span>
+          </button>
+          <button
+            onClick={() => setReceipt(null)}
+            className="btn-teal w-full py-2.5 rounded-xl text-xs font-bold"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+    </div >
   );
 }

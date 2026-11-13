@@ -70,7 +70,7 @@ export default function FamilyDepositHistoryPage() {
             Deposit History
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Complete record of electronic commissary deposits placed through TouchPay.
+            Complete record of electronic commissary deposits placed through Stripe and PayPal.
           </p>
         </div>
 
@@ -128,7 +128,7 @@ export default function FamilyDepositHistoryPage() {
                     Beneficiary: <strong className="text-slate-900 dark:text-white">{dep.offender.name}</strong> ({dep.offender.id}) &bull; {dep.offender.unit}
                   </div>
                   <div className="text-[11px] text-slate-400 dark:text-slate-500 font-mono mt-0.5">
-                    {dateStr} &bull; TouchPay Gateway
+                    {dateStr} &bull; Electronic Gateway
                   </div>
                 </div>
 
