@@ -25,8 +25,11 @@ function checkSearchRateLimit(userId: string): boolean {
 export async function GET(req: NextRequest) {
   try {
     const session = await getCurrentSession();
-    if (!session || session.role !== 'FAMILY') {
+    if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (session.role !== 'FAMILY') {
+      return NextResponse.json({ error: 'Forbidden: Family account privileges required.' }, { status: 403 });
     }
 
     const rateLimitKey = session.userId || 'family_session';

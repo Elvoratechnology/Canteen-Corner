@@ -8,7 +8,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 
 export default function HomePage() {
   return (
-    <main className="min-h-screen flex flex-col justify-between relative overflow-hidden bg-[#f8fafc] dark:bg-black text-slate-900 dark:text-white transition-colors duration-200">
+    <main className="min-h-screen min-h-screen-dvh flex flex-col justify-between relative overflow-hidden bg-[#f8fafc] dark:bg-black text-slate-900 dark:text-white transition-colors duration-200 pt-safe pb-safe">
       {/* Background illustration for Light Mode and Dark Mode */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         {/* Soft subtle neutral shadows */}
@@ -232,21 +232,40 @@ export default function HomePage() {
               </div>
             </div>
           </Link>
+
+          {/* 4. Administration Portal */}
+          <Link
+            href="/admin/login"
+            className="group block bg-white dark:bg-[#121212] p-3.5 sm:p-4 rounded-3xl border border-slate-200/90 dark:border-[#262626] shadow-sm hover:shadow-md hover:border-indigo-400 dark:hover:border-purple-500 transition-all"
+          >
+            <div className="flex items-center gap-4 sm:gap-5">
+              {/* Vibrant Indigo/Purple Squircle with Admin Shield */}
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-br from-indigo-600 to-purple-600 text-white flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                <ShieldCheck className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+              </div>
+
+              {/* Title & Description */}
+              <div className="flex-1 min-w-0">
+                <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white">
+                  Admin Console
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">
+                  Staff, inmate trust ledgers & facility rules.
+                </p>
+              </div>
+
+              {/* Circular Action Button with Arrow */}
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-indigo-50 dark:bg-purple-950/40 text-indigo-600 dark:text-purple-400 flex items-center justify-center shrink-0 group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6 group-hover:translate-x-0.5 transition-transform" />
+              </div>
+            </div>
+          </Link>
         </div>
 
-        {/* Demo Credentials Quick-Select Pill */}
-        <div className="mt-8 p-3 rounded-2xl bg-slate-100 dark:bg-[#141414] border border-slate-200 dark:border-[#262626] text-xs text-slate-600 dark:text-neutral-400 flex flex-wrap items-center justify-around gap-2 text-center">
-          <span>
-            Inmate: <strong className="text-slate-900 dark:text-white font-mono">A1234567</strong> (PIN: 1234)
-          </span>
-          <span className="text-slate-400 dark:text-neutral-600">&bull;</span>
-          <span>
-            Family: <strong className="text-slate-900 dark:text-white">family@canteen.local</strong>
-          </span>
-          <span className="text-slate-400 dark:text-neutral-600">&bull;</span>
-          <span>
-            Staff: <strong className="text-slate-900 dark:text-white">picker@canteen.local</strong>
-          </span>
+        {/* Institutional System Security Notice */}
+        <div className="mt-8 p-3 rounded-2xl bg-slate-100 dark:bg-[#141414] border border-slate-200 dark:border-[#262626] text-xs text-slate-500 dark:text-neutral-400 flex items-center justify-center gap-2 text-center">
+          <ShieldCheck className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
+          <span>Authorized Correctional Facility Commissary &bull; Electronic Trust Accounting System</span>
         </div>
       </div>
 

@@ -95,7 +95,7 @@ export default function FamilyRegisterPage() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Sarah Smith"
-                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:border-teal-500"
+                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white placeholder-slate-400 text-base sm:text-sm focus:outline-none focus:border-teal-500 min-h-[44px]"
               />
             </div>
           </div>
@@ -114,7 +114,7 @@ export default function FamilyRegisterPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="sarah@example.com"
-                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:border-teal-500"
+                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white placeholder-slate-400 text-base sm:text-sm focus:outline-none focus:border-teal-500 min-h-[44px]"
               />
             </div>
           </div>
@@ -126,7 +126,7 @@ export default function FamilyRegisterPage() {
             <select
               value={relationship}
               onChange={(e) => setRelationship(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white text-sm focus:outline-none focus:border-teal-500"
+              className="w-full px-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white text-base sm:text-sm focus:outline-none focus:border-teal-500 min-h-[44px]"
             >
               <option value="Family">Family Member (Spouse, Parent, Sibling, Child)</option>
               <option value="Friend">Personal Friend</option>
@@ -150,7 +150,7 @@ export default function FamilyRegisterPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:border-teal-500"
+                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white placeholder-slate-400 text-base sm:text-sm focus:outline-none focus:border-teal-500 min-h-[44px]"
               />
             </div>
           </div>
@@ -158,7 +158,7 @@ export default function FamilyRegisterPage() {
           <button
             type="submit"
             disabled={loading}
-            className="btn-teal w-full py-3 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 mt-4 shadow-sm"
+            className="btn-teal w-full py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 mt-4 shadow-sm min-h-[48px] touch-manipulation disabled:opacity-50"
           >
             {loading ? (
               <>

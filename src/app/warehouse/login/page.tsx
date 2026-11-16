@@ -45,18 +45,6 @@ export default function WarehouseLoginPage() {
     }
   };
 
-  const fillPicker = () => {
-    setIdentifier('STF-01');
-    setPassword('Staff123!');
-    setError(null);
-  };
-
-  const fillSupervisor = () => {
-    setIdentifier('STF-02');
-    setPassword('Staff123!');
-    setError(null);
-  };
-
   return (
     <div className="min-h-screen bg-[#f8fafc] dark:bg-black text-slate-900 dark:text-slate-100 flex flex-col justify-center items-center p-4 sm:p-6 relative transition-colors duration-200">
       <div className="w-full max-w-md mb-6 flex justify-between items-center">
@@ -104,7 +92,7 @@ export default function WarehouseLoginPage() {
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 placeholder="e.g. STF-01 or picker@canteen.local"
-                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white font-mono text-base focus:outline-none focus:border-teal-500"
+                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white font-mono text-base focus:outline-none focus:border-teal-500 min-h-[44px]"
               />
             </div>
           </div>
@@ -127,7 +115,7 @@ export default function WarehouseLoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white text-base focus:outline-none focus:border-teal-500"
+                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white text-base focus:outline-none focus:border-teal-500 min-h-[44px]"
               />
             </div>
           </div>
@@ -135,7 +123,7 @@ export default function WarehouseLoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3.5 rounded-2xl bg-teal-500 text-white font-extrabold text-sm flex items-center justify-center gap-2 mt-2 shadow-sm hover:bg-teal-600 transition-all"
+            className="w-full py-3.5 rounded-2xl bg-teal-500 text-white font-extrabold text-sm flex items-center justify-center gap-2 mt-2 shadow-sm hover:bg-teal-600 transition-all min-h-[48px] touch-manipulation disabled:opacity-50"
           >
             {loading ? (
               <>
@@ -147,24 +135,6 @@ export default function WarehouseLoginPage() {
             )}
           </button>
         </form>
-
-        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-[#222222] flex flex-col sm:flex-row items-center justify-center gap-3 text-xs">
-          <button
-            type="button"
-            onClick={fillPicker}
-            className="text-teal-600 dark:text-teal-400 hover:underline font-semibold"
-          >
-            Demo Picker (STF-01)
-          </button>
-          <span className="hidden sm:inline text-slate-300 dark:text-slate-700">&bull;</span>
-          <button
-            type="button"
-            onClick={fillSupervisor}
-            className="text-teal-600 dark:text-teal-400 hover:underline font-semibold"
-          >
-            Demo Supervisor (STF-02)
-          </button>
-        </div>
       </div>
     </div>
   );

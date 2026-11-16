@@ -48,12 +48,6 @@ export default function FamilyLoginPage() {
     }
   };
 
-  const handleDemoFill = () => {
-    setEmail('family@canteen.local');
-    setPassword('Password123!');
-    setError(null);
-  };
-
   return (
     <div className="min-h-screen bg-[#f8fafc] dark:bg-black text-slate-900 dark:text-white flex flex-col justify-center items-center p-4 sm:p-6 relative transition-colors duration-200">
       {/* Return to portal selection & Theme Toggle */}
@@ -106,7 +100,7 @@ export default function FamilyLoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="family@canteen.local"
-                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:border-teal-500"
+                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white placeholder-slate-400 text-base sm:text-sm focus:outline-none focus:border-teal-500 min-h-[44px]"
               />
             </div>
           </div>
@@ -121,7 +115,7 @@ export default function FamilyLoginPage() {
               </label>
               <Link
                 href="/family/forgot-password"
-                className="text-xs text-teal-600 dark:text-teal-400 hover:underline"
+                className="text-xs text-teal-600 dark:text-teal-400 hover:underline min-h-[32px] inline-flex items-center"
               >
                 Forgot password?
               </Link>
@@ -137,7 +131,7 @@ export default function FamilyLoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:border-teal-500"
+                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white placeholder-slate-400 text-base sm:text-sm focus:outline-none focus:border-teal-500 min-h-[44px]"
               />
             </div>
           </div>
@@ -145,7 +139,7 @@ export default function FamilyLoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="btn-teal w-full py-3 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 mt-2 shadow-sm"
+            className="btn-teal w-full py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 mt-2 shadow-sm min-h-[48px] touch-manipulation disabled:opacity-50"
           >
             {loading ? (
               <>
@@ -157,17 +151,6 @@ export default function FamilyLoginPage() {
             )}
           </button>
         </form>
-
-        {/* Demo Login Shortcut */}
-        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
-          <button
-            type="button"
-            onClick={handleDemoFill}
-            className="text-xs text-teal-600 dark:text-teal-400 hover:underline font-medium"
-          >
-            Fill Demo Account: Sarah Smith (family@canteen.local)
-          </button>
-        </div>
 
         {/* Register link */}
         <div className="mt-5 text-center text-xs text-slate-500 dark:text-slate-400">

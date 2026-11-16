@@ -44,11 +44,12 @@ export default function WarehouseLayout({
         return res.json();
       })
       .then((data) => {
-        if (
-          data?.user &&
-          ['WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR', 'ADMIN'].includes(data.user.role)
-        ) {
-          setStaff(data.user);
+        if (!data) return;
+        const role = data?.user?.role || data?.session?.role;
+        if (['WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR'].includes(role)) {
+          setStaff(data.user || data.session);
+        } else if (data.authenticated) {
+          router.push('/access-denied?from=/warehouse&required=WAREHOUSE');
         } else {
           router.push('/warehouse/login');
         }
@@ -71,11 +72,10 @@ export default function WarehouseLayout({
     { href: '/warehouse/manifests', label: 'Delivery Manifests', icon: FileSpreadsheet },
   ];
 
-  const isSupervisor =
-    staff?.role === 'WAREHOUSE_SUPERVISOR' || staff?.role === 'ADMIN';
+  const isSupervisor = staff?.role === 'WAREHOUSE_SUPERVISOR';
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] dark:bg-black text-slate-900 dark:text-slate-100 flex flex-col md:flex-row pb-20 md:pb-0 transition-colors duration-200">
+    <div className="min-h-screen min-h-screen-dvh bg-[#f8fafc] dark:bg-black text-slate-900 dark:text-slate-100 flex flex-col md:flex-row pb-20 md:pb-0 transition-colors duration-200">
       {/* Sidebar for Tablet & Desktop */}
       <aside className="hidden md:flex flex-col w-60 lg:w-64 border-r border-slate-200 dark:border-[#222222] bg-white dark:bg-[#0c0c0c] p-4 shrink-0 min-h-screen sticky top-0 h-screen justify-between z-30 transition-colors no-print">
         <div>
@@ -150,10 +150,11 @@ export default function WarehouseLayout({
             <ThemeToggle />
             <button
               onClick={handleLogout}
-              className="md:hidden p-2 rounded-xl bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400"
+              className="md:hidden w-11 h-11 rounded-xl bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 flex items-center justify-center min-w-[44px] min-h-[44px] touch-manipulation"
               title="Sign Out"
+              aria-label="Sign Out"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-5 h-5" />
             </button>
           </div>
         </header>
@@ -163,8 +164,8 @@ export default function WarehouseLayout({
         </main>
       </div>
 
-      {/* Mobile Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-[#0c0c0c]/95 backdrop-blur-md border-t border-slate-200 dark:border-[#222222] safe-bottom no-print">
+      {/* Mobile Navigation with Safe Area */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-[#0c0c0c]/95 backdrop-blur-md border-t border-slate-200 dark:border-[#222222] pb-safe safe-bottom no-print">
         <div className="grid grid-cols-3 h-16 items-center px-2">
           {navLinks.map((link) => {
             const Icon = link.icon;

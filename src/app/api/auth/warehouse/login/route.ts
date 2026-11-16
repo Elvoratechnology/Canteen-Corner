@@ -32,9 +32,6 @@ export async function POST(req: NextRequest) {
           { email: lowerId },
           { staffId: identifier.toUpperCase() },
         ],
-        role: {
-          in: ['WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR', 'ADMIN'],
-        },
       },
     });
 
@@ -42,6 +39,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: 'Invalid Staff ID/Email or Password.' },
         { status: 401 }
+      );
+    }
+
+    // Role-based boundary: Only WAREHOUSE_PICKER and WAREHOUSE_SUPERVISOR are allowed
+    if (!['WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR'].includes(user.role)) {
+      return NextResponse.json(
+        { error: 'Access denied: User account is not authorized for warehouse operations.' },
+        { status: 403 }
       );
     }
 

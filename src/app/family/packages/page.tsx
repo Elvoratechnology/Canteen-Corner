@@ -43,7 +43,7 @@ export default function FamilyGiftPackagesPage() {
 
   // New package modal state
   const [showModal, setShowModal] = useState(false);
-  const [offenderIdInput, setOffenderIdInput] = useState('A1234567');
+  const [offenderIdInput, setOffenderIdInput] = useState('');
   const [packageNameInput, setPackageNameInput] = useState('Quarterly Care Package');
   const [selectedItems, setSelectedItems] = useState<Record<string, number>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -175,7 +175,7 @@ export default function FamilyGiftPackagesPage() {
         {giftPackagesEnabled && (
           <button
             onClick={() => setShowModal(true)}
-            className="btn-teal inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-sm self-start sm:self-auto"
+            className="btn-teal inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold shadow-sm self-start sm:self-auto min-h-[44px] touch-manipulation"
           >
             <Plus className="w-4 h-4" />
             <span>Send Care Package</span>
@@ -268,10 +268,12 @@ export default function FamilyGiftPackagesPage() {
                 <h3 className="font-bold text-slate-900 dark:text-white text-base">Build Care Package</h3>
               </div>
               <button
+                type="button"
                 onClick={() => setShowModal(false)}
-                className="p-1.5 rounded-xl bg-slate-100 dark:bg-[#181818] text-slate-400 hover:text-black dark:hover:text-white"
+                className="w-11 h-11 rounded-xl bg-slate-100 dark:bg-[#181818] text-slate-500 hover:text-black dark:hover:text-white flex items-center justify-center min-h-[44px] min-w-[44px] touch-manipulation"
+                aria-label="Close modal"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
@@ -294,7 +296,7 @@ export default function FamilyGiftPackagesPage() {
                     value={offenderIdInput}
                     onChange={(e) => setOffenderIdInput(e.target.value.toUpperCase())}
                     placeholder="e.g. A1234567"
-                    className="w-full px-3 py-2 rounded-2xl bg-slate-50 dark:bg-[#181818]/40 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-sm"
+                    className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818]/40 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-base sm:text-sm min-h-[44px]"
                   />
                 </div>
 
@@ -308,7 +310,7 @@ export default function FamilyGiftPackagesPage() {
                     value={packageNameInput}
                     onChange={(e) => setPackageNameInput(e.target.value)}
                     placeholder="e.g. Snack Pack"
-                    className="w-full px-3 py-2 rounded-2xl bg-slate-50 dark:bg-[#181818]/40 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm"
+                    className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-50 dark:bg-[#181818]/40 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-base sm:text-sm min-h-[44px]"
                   />
                 </div>
               </div>
@@ -318,35 +320,37 @@ export default function FamilyGiftPackagesPage() {
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
                   Select Approved Items
                 </label>
-                <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-[#262626] rounded-2xl bg-slate-50/50 dark:bg-[#181818]/20 max-h-56 overflow-y-auto">
+                <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-[#262626] rounded-2xl bg-slate-50/50 dark:bg-[#181818]/20 max-h-60 overflow-y-auto">
                   {approvedProducts.map((prod) => {
                     const qty = selectedItems[prod.id] || 0;
                     return (
-                      <div key={prod.id} className="p-2.5 flex items-center justify-between text-xs">
-                        <div>
-                          <span className="font-semibold text-slate-900 dark:text-white block">{prod.name}</span>
+                      <div key={prod.id} className="p-3 flex items-center justify-between text-xs gap-2">
+                        <div className="min-w-0 flex-1">
+                          <span className="font-semibold text-slate-900 dark:text-white block truncate">{prod.name}</span>
                           <span className="text-slate-500 text-[11px]">
                             ${prod.price.toFixed(2)} &bull; {prod.category}
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-1 bg-white dark:bg-[#181818] rounded-xl p-1 border border-slate-200 dark:border-slate-700">
+                        <div className="flex items-center gap-1 bg-white dark:bg-[#181818] rounded-2xl p-1 border border-slate-200 dark:border-slate-700 shrink-0">
                           <button
                             type="button"
                             onClick={() => handleQuantityChange(prod.id, -1)}
-                            className="w-6 h-6 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                            className="w-11 h-11 rounded-xl flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white active:scale-95 touch-manipulation min-w-[44px] min-h-[44px]"
+                            aria-label={`Decrease ${prod.name}`}
                           >
-                            <Minus className="w-3 h-3" />
+                            <Minus className="w-4 h-4" />
                           </button>
-                          <span className="w-6 text-center font-mono font-bold text-teal-600 dark:text-teal-400">
+                          <span className="w-8 text-center font-mono font-bold text-teal-600 dark:text-teal-400 text-sm">
                             {qty}
                           </span>
                           <button
                             type="button"
                             onClick={() => handleQuantityChange(prod.id, 1)}
-                            className="w-6 h-6 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                            className="w-11 h-11 rounded-xl flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white active:scale-95 touch-manipulation min-w-[44px] min-h-[44px]"
+                            aria-label={`Increase ${prod.name}`}
                           >
-                            <Plus className="w-3 h-3" />
+                            <Plus className="w-4 h-4" />
                           </button>
                         </div>
                       </div>
@@ -358,13 +362,13 @@ export default function FamilyGiftPackagesPage() {
               {/* Total & Submit */}
               <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-[#181818]/40 border border-slate-200 dark:border-[#262626] flex justify-between items-center text-sm font-bold">
                 <span className="text-slate-600 dark:text-slate-400">Package Value:</span>
-                <span className="font-mono text-teal-600 dark:text-teal-400">${calculatePackageTotal().toFixed(2)}</span>
+                <span className="font-mono text-teal-600 dark:text-teal-400 text-base">${calculatePackageTotal().toFixed(2)}</span>
               </div>
 
               <button
                 type="submit"
                 disabled={submitting || calculatePackageTotal() <= 0}
-                className="btn-teal w-full py-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm"
+                className="btn-teal w-full py-3.5 rounded-2xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm min-h-[48px] touch-manipulation disabled:opacity-50"
               >
                 {submitting ? (
                   <>

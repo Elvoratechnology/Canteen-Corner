@@ -189,23 +189,27 @@ export default function CartPage() {
                 </div>
               </div>
 
-              {/* Quantity Controls */}
-              <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-[#181818] border border-slate-200 dark:border-slate-700 rounded-2xl p-1">
+              {/* Quantity Controls with Touch Target >= 44px */}
+              <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-[#181818] border border-slate-200 dark:border-slate-700 rounded-2xl p-1 shadow-inner">
                 <button
+                  type="button"
                   onClick={() => updateQuantity(item.productId, item.quantity - 1)}
-                  className="w-7 h-7 rounded-xl bg-white dark:bg-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200"
+                  className="min-w-[44px] min-h-[44px] rounded-xl bg-white dark:bg-[#242424] hover:bg-slate-50 dark:hover:bg-[#2e2e2e] flex items-center justify-center text-slate-800 dark:text-white transition-all active:scale-95 border border-slate-200 dark:border-[#333333]"
+                  title="Decrease quantity"
                 >
-                  <Minus className="w-3.5 h-3.5" />
+                  <Minus className="w-4 h-4" />
                 </button>
-                <span className="w-7 text-center font-mono font-bold text-teal-600 dark:text-teal-400 text-sm">
+                <span className="w-8 text-center font-mono font-black text-teal-600 dark:text-teal-400 text-sm">
                   {item.quantity}
                 </span>
                 <button
-                  onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                  type="button"
                   disabled={item.quantity >= item.stock}
-                  className="w-7 h-7 rounded-xl bg-white dark:bg-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 disabled:opacity-40"
+                  onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                  className="min-w-[44px] min-h-[44px] rounded-xl bg-white dark:bg-[#242424] hover:bg-slate-50 dark:hover:bg-[#2e2e2e] flex items-center justify-center text-slate-800 dark:text-white transition-all active:scale-95 border border-slate-200 dark:border-[#333333] disabled:opacity-40"
+                  title="Increase quantity"
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Plus className="w-4 h-4" />
                 </button>
               </div>
 
@@ -297,6 +301,39 @@ export default function CartPage() {
               )}
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Sticky Mobile Checkout Bar */}
+      <div className="md:hidden fixed bottom-16 left-0 right-0 z-30 px-3 pb-2 pt-1 bg-gradient-to-t from-slate-900/90 via-slate-900/60 to-transparent backdrop-blur-sm safe-bottom">
+        <div className="max-w-md mx-auto bg-slate-900 dark:bg-[#161616] border border-teal-500/50 p-3 rounded-2xl shadow-2xl flex items-center justify-between text-white">
+          <div>
+            <span className="text-[11px] text-slate-400 block leading-tight">
+              Order Total ({totalItems} items)
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="font-mono text-base font-black text-teal-400">
+                ${total.toFixed(2)}
+              </span>
+              <span className={`text-[10px] font-mono ${exceedsBalance ? 'text-red-400 font-bold' : 'text-slate-400'}`}>
+                Bal: ${projectedBalance.toFixed(2)}
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSubmitOrder}
+            disabled={!canSubmit}
+            className="btn-teal px-5 py-2.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-md active:scale-95 transition-all disabled:opacity-50"
+          >
+            {submitting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4" />
+            )}
+            <span>{submitting ? 'Placing...' : 'Submit Order'}</span>
+          </button>
         </div>
       </div>
     </div>

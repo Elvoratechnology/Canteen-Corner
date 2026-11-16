@@ -10,6 +10,7 @@ import {
   Package,
   PackageX,
   Loader2,
+  ArrowRight,
 } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 
@@ -206,22 +207,26 @@ export default function CatalogPage() {
                         <span>Add</span>
                       </button>
                     ) : (
-                      <div className="flex items-center gap-1 bg-slate-100 dark:bg-[#181818] border border-teal-500/40 rounded-2xl p-1">
+                      <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-[#181818] border border-teal-500/40 rounded-2xl p-1 shadow-inner">
                         <button
+                          type="button"
                           onClick={() => updateQuantity(prod.id, qtyInCart - 1)}
-                          className="w-7 h-7 rounded-xl bg-white dark:bg-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:text-black dark:hover:text-white transition-colors"
+                          className="min-w-[44px] min-h-[44px] rounded-xl bg-white dark:bg-[#242424] hover:bg-slate-50 dark:hover:bg-[#2e2e2e] flex items-center justify-center text-slate-800 dark:text-white transition-all active:scale-95 border border-slate-200 dark:border-[#333333]"
+                          title="Decrease quantity"
                         >
-                          <Minus className="w-3.5 h-3.5" />
+                          <Minus className="w-4 h-4" />
                         </button>
-                        <span className="w-7 text-center font-mono font-bold text-teal-600 dark:text-teal-400 text-sm">
+                        <span className="w-8 text-center font-mono font-black text-teal-600 dark:text-teal-400 text-base">
                           {qtyInCart}
                         </span>
                         <button
+                          type="button"
                           disabled={qtyInCart >= prod.stock}
                           onClick={() => updateQuantity(prod.id, qtyInCart + 1)}
-                          className="w-7 h-7 rounded-xl bg-white dark:bg-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:text-black dark:hover:text-white transition-colors disabled:opacity-40"
+                          className="min-w-[44px] min-h-[44px] rounded-xl bg-white dark:bg-[#242424] hover:bg-slate-50 dark:hover:bg-[#2e2e2e] flex items-center justify-center text-slate-800 dark:text-white transition-all active:scale-95 border border-slate-200 dark:border-[#333333] disabled:opacity-40"
+                          title="Increase quantity"
                         >
-                          <Plus className="w-3.5 h-3.5" />
+                          <Plus className="w-4 h-4" />
                         </button>
                       </div>
                     )}
@@ -233,19 +238,32 @@ export default function CatalogPage() {
         </div>
       )}
 
-      {/* Floating cart pill on mobile */}
+      {/* Sticky Mobile Cart Summary Bar */}
       {totalItems > 0 && (
-        <div className="md:hidden fixed bottom-20 left-4 right-4 z-30">
-          <Link
-            href="/inmate/cart"
-            className="btn-teal w-full py-3 px-5 rounded-2xl flex items-center justify-between shadow-lg font-bold text-sm"
-          >
-            <div className="flex items-center gap-2">
-              <ShoppingCart className="w-5 h-5" />
-              <span>Checkout ({totalItems} items)</span>
+        <div className="md:hidden fixed bottom-16 left-0 right-0 z-30 px-3 pb-2 pt-1 bg-gradient-to-t from-slate-900/90 via-slate-900/60 to-transparent backdrop-blur-sm safe-bottom">
+          <div className="max-w-md mx-auto bg-slate-900 dark:bg-[#161616] border border-teal-500/50 p-3 rounded-2xl shadow-2xl flex items-center justify-between text-white">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-teal-500 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-sm">
+                <ShoppingCart className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-xs font-bold block leading-tight">
+                  {totalItems} item{totalItems > 1 ? 's' : ''} in cart
+                </span>
+                <span className="text-sm font-mono font-black text-teal-400">
+                  ${subtotal.toFixed(2)}
+                </span>
+              </div>
             </div>
-            <span className="font-mono text-base">${subtotal.toFixed(2)}</span>
-          </Link>
+
+            <Link
+              href="/inmate/cart"
+              className="btn-teal px-4 py-2.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-md active:scale-95 transition-all"
+            >
+              <span>Review &amp; Pay</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
         </div>
       )}
     </div>

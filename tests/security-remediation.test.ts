@@ -529,7 +529,7 @@ describe('Critical Application Security Remediation Suite', () => {
     const originalEnv = process.env.NODE_ENV;
 
     it('should return 404 in production regardless of simulation flags', async () => {
-      process.env.NODE_ENV = 'production';
+      (process.env as any).NODE_ENV = 'production';
       process.env.ENABLE_PAYMENT_SIMULATION = 'true';
       process.env.ENABLE_TOUCHPAY_SIMULATION = 'true';
 
@@ -545,7 +545,7 @@ describe('Critical Application Security Remediation Suite', () => {
       expect(res.status).toBe(404);
       expect(data.error).toBe('Not Found');
 
-      process.env.NODE_ENV = originalEnv;
+      (process.env as any).NODE_ENV = originalEnv;
       delete process.env.ENABLE_PAYMENT_SIMULATION;
       delete process.env.ENABLE_TOUCHPAY_SIMULATION;
     });

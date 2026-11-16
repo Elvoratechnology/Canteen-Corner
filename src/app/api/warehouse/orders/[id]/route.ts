@@ -10,15 +10,21 @@ export async function GET(
 ) {
   try {
     const session = await getCurrentSession();
-    if (!session || !['WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR', 'ADMIN'].includes(session.role)) {
+    if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (!['WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR'].includes(session.role)) {
+      return NextResponse.json(
+        { error: 'Forbidden: Warehouse operational privileges required.' },
+        { status: 403 }
+      );
     }
 
     const order = await prisma.order.findUnique({
       where: { id: params.id },
       include: {
         offender: {
-          select: { id: true, name: true, unit: true, housing: true, facility: true },
+          select: { id: true, name: true, unit: true, housing: true, facility: true, facilityId: true },
         },
         items: { include: { product: true } },
         statusHistory: { orderBy: { createdAt: 'asc' } },
@@ -62,8 +68,14 @@ export async function PATCH(
 ) {
   try {
     const session = await getCurrentSession();
-    if (!session || !['WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR', 'ADMIN'].includes(session.role)) {
+    if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (!['WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR'].includes(session.role)) {
+      return NextResponse.json(
+        { error: 'Forbidden: Warehouse operational privileges required.' },
+        { status: 403 }
+      );
     }
 
     const body = await req.json();

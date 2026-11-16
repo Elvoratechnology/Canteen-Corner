@@ -8,8 +8,11 @@ export async function PATCH(
 ) {
   try {
     const session = await getCurrentSession();
-    if (!session || session.role !== 'INMATE' || !session.offenderId) {
+    if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (session.role !== 'INMATE' || !session.offenderId) {
+      return NextResponse.json({ error: 'Forbidden: Inmate privileges required.' }, { status: 403 });
     }
 
     await prisma.notification.updateMany({

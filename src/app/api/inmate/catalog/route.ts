@@ -5,8 +5,11 @@ import { getCurrentSession } from '@/lib/auth';
 export async function GET(req: NextRequest) {
   try {
     const session = await getCurrentSession();
-    if (!session || session.role !== 'INMATE' || !session.offenderId) {
+    if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (session.role !== 'INMATE' || !session.offenderId) {
+      return NextResponse.json({ error: 'Forbidden: Inmate privileges required.' }, { status: 403 });
     }
 
     // Derive the inmate's facilityId from the authenticated session and verified offender record

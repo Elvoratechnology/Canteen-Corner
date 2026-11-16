@@ -156,7 +156,8 @@ export default function AccountBalancePage() {
           </span>
         </div>
 
-        <div className="overflow-x-auto mt-4">
+        {/* Desktop / Tablet Audited Ledger Table */}
+        <div className="hidden md:block overflow-x-auto mt-4">
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-slate-100 dark:border-[#262626] text-slate-400 uppercase tracking-wider text-[10px]">
@@ -169,37 +170,92 @@ export default function AccountBalancePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-              {data.ledgerEntries.map((entry) => {
-                const date = new Date(entry.date).toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                });
-                return (
-                  <tr key={entry.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="py-3 px-3 text-slate-600 dark:text-slate-300 font-mono whitespace-nowrap">
-                      {date}
-                    </td>
-                    <td className="py-3 px-3 font-semibold text-slate-900 dark:text-white">
-                      {entry.description}
-                    </td>
-                    <td className="py-3 px-3 font-mono text-slate-500 text-[11px]">
-                      {entry.referenceId}
-                    </td>
-                    <td className="py-3 px-3 text-right font-mono font-bold text-red-500">
-                      {entry.debit > 0 ? `-$${entry.debit.toFixed(2)}` : '—'}
-                    </td>
-                    <td className="py-3 px-3 text-right font-mono font-bold text-emerald-600 dark:text-teal-400">
-                      {entry.credit > 0 ? `+$${entry.credit.toFixed(2)}` : '—'}
-                    </td>
-                    <td className="py-3 px-3 text-right font-mono font-black text-slate-900 dark:text-white">
-                      ${entry.balanceAfter.toFixed(2)}
-                    </td>
-                  </tr>
-                );
-              })}
+              {data.ledgerEntries.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-slate-400">
+                    No transactions recorded yet.
+                  </td>
+                </tr>
+              ) : (
+                data.ledgerEntries.map((entry) => {
+                  const date = new Date(entry.date).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  });
+                  return (
+                    <tr key={entry.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="py-3 px-3 text-slate-600 dark:text-slate-300 font-mono whitespace-nowrap">
+                        {date}
+                      </td>
+                      <td className="py-3 px-3 font-semibold text-slate-900 dark:text-white">
+                        {entry.description}
+                      </td>
+                      <td className="py-3 px-3 font-mono text-slate-500 text-[11px]">
+                        {entry.referenceId}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono font-bold text-red-500">
+                        {entry.debit > 0 ? `-$${entry.debit.toFixed(2)}` : '—'}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono font-bold text-emerald-600 dark:text-teal-400">
+                        {entry.credit > 0 ? `+$${entry.credit.toFixed(2)}` : '—'}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono font-black text-slate-900 dark:text-white">
+                        ${entry.balanceAfter.toFixed(2)}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Adaptive Cards View (No Horizontal Scroll) */}
+        <div className="md:hidden mt-4 space-y-3">
+          {data.ledgerEntries.length === 0 ? (
+            <p className="text-xs text-slate-400 text-center py-6">No ledger entries recorded.</p>
+          ) : (
+            data.ledgerEntries.map((entry) => {
+              const date = new Date(entry.date).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              });
+              const isDebit = entry.debit > 0;
+
+              return (
+                <div
+                  key={entry.id}
+                  className="p-3.5 rounded-2xl bg-slate-50 dark:bg-[#181818]/60 border border-slate-200 dark:border-[#262626] space-y-2 text-xs"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-[11px] text-slate-500 dark:text-neutral-400">
+                      {date} &bull; {entry.referenceId}
+                    </span>
+                    <span
+                      className={`font-mono font-black text-sm ${
+                        isDebit ? 'text-red-500' : 'text-emerald-600 dark:text-teal-400'
+                      }`}
+                    >
+                      {isDebit ? `-$${entry.debit.toFixed(2)}` : `+$${entry.credit.toFixed(2)}`}
+                    </span>
+                  </div>
+
+                  <div className="font-semibold text-slate-900 dark:text-white">
+                    {entry.description}
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-200 dark:border-[#262626] flex justify-between text-[11px] text-slate-500">
+                    <span>Reconciled Balance After:</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                      ${entry.balanceAfter.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>

@@ -5,8 +5,14 @@ import { getCurrentSession } from '@/lib/auth';
 export async function GET(req: NextRequest) {
   try {
     const session = await getCurrentSession();
-    if (!session || !['WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR', 'ADMIN'].includes(session.role)) {
+    if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (!['WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR'].includes(session.role)) {
+      return NextResponse.json(
+        { error: 'Forbidden: Warehouse operational privileges required.' },
+        { status: 403 }
+      );
     }
 
     // Require valid facilityId for warehouse staff; never omit facility filtering

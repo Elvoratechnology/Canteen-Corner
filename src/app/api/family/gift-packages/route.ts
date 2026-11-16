@@ -18,8 +18,11 @@ const SubmitGiftPackageSchema = z.object({
 export async function GET() {
   try {
     const session = await getCurrentSession();
-    if (!session || session.role !== 'FAMILY') {
+    if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (session.role !== 'FAMILY') {
+      return NextResponse.json({ error: 'Forbidden: Family account privileges required.' }, { status: 403 });
     }
 
     const familyAccount = await prisma.familyAccount.findUnique({
@@ -63,8 +66,11 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const session = await getCurrentSession();
-    if (!session || session.role !== 'FAMILY') {
+    if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (session.role !== 'FAMILY') {
+      return NextResponse.json({ error: 'Forbidden: Family account privileges required.' }, { status: 403 });
     }
 
     const familyAccount = await prisma.familyAccount.findUnique({

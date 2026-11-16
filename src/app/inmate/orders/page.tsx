@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import {
   Clock,
   Package,
@@ -106,7 +107,14 @@ export default function OrderHistoryPage() {
         <div className="bg-white dark:bg-[#121212] p-10 rounded-3xl text-center border border-slate-200 dark:border-[#262626]">
           <Clock className="w-10 h-10 text-slate-400 mx-auto mb-2" />
           <h3 className="text-base font-bold text-slate-900 dark:text-white">No Orders Found</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">You have not placed any commissary orders yet.</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 mb-4">You have not placed any commissary orders yet.</p>
+          <Link
+            href="/inmate/catalog"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-sm transition-colors min-h-[44px]"
+          >
+            <span>Browse Catalog</span>
+            <ArrowRight className="w-4 h-4" />
+          </Link>
         </div>
       ) : (
         <div className="space-y-3">
@@ -152,7 +160,7 @@ export default function OrderHistoryPage() {
 
                   <button
                     onClick={() => setSelectedOrder(order)}
-                    className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-[#181818] hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 flex items-center gap-1.5 transition-colors"
+                    className="min-h-[44px] px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-[#181818] hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 flex items-center gap-1.5 transition-colors active:scale-95"
                   >
                     <span>View Details</span>
                     <ArrowRight className="w-3.5 h-3.5 text-teal-500" />

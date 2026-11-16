@@ -9,7 +9,10 @@
     "start": "next start",
     "lint": "next lint",
     "db:push": "prisma db push",
+    "db:init": "node prisma/init.js",
+    "db:clean": "node prisma/clean.js",
     "db:seed": "node prisma/seed.js",
+    "db:seed:demo": "node prisma/seed.js --demo",
     "db:studio": "prisma studio",
     "test": "vitest run",
     "test:watch": "vitest"

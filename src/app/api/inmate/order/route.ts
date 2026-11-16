@@ -16,8 +16,11 @@ const SubmitOrderSchema = z.object({
 export async function POST(req: NextRequest) {
   try {
     const session = await getCurrentSession();
-    if (!session || session.role !== 'INMATE' || !session.offenderId) {
-      return NextResponse.json({ error: 'Unauthorized session.' }, { status: 401 });
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (session.role !== 'INMATE' || !session.offenderId) {
+      return NextResponse.json({ error: 'Forbidden: Inmate privileges required.' }, { status: 403 });
     }
 
     const body = await req.json();

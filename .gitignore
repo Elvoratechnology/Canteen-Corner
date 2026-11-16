@@ -32,7 +32,12 @@ prisma/dev.db*
 *.db-shm
 *.db-wal
 
-# OS / Editor files
+# TypeScript build info
+*.tsbuildinfo
+
+# Scratch scripts & temporary audit files
+scratch/
+
 .DS_Store
 *.pem
 Thumbs.db

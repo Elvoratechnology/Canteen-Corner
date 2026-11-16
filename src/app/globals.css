@@ -28,10 +28,12 @@ body {
   color: var(--text-color);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   min-height: 100vh;
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   margin: 0;
   padding: 0;
+  overflow-x: hidden;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
@@ -59,12 +61,15 @@ body {
   box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.4);
 }
 
+/* Form Inputs with Strict 16px Font Size on Mobile to Stop iOS Auto-Zoom */
 .glass-input {
   background-color: #ffffff;
   border: 1px solid #cbd5e1;
   color: #0f172a;
-  font-size: 16px; /* Prevents auto-zoom on iOS */
-  min-height: 44px; /* Touch target requirement */
+  font-size: 16px;
+  /* Prevents auto-zoom on iOS */
+  min-height: 44px;
+  /* Touch target requirement */
   font-family: inherit;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -79,6 +84,16 @@ html.dark .glass-input {
   outline: none;
   border-color: #14b8a6;
   box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.25);
+}
+
+/* Enforce 16px minimum font size on all input fields below 768px */
+@media screen and (max-width: 768px) {
+
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }
 
 .btn-teal {
@@ -110,7 +125,7 @@ html.dark .btn-teal {
   cursor: not-allowed;
 }
 
-/* Touch targets >= 44px */
+/* Touch-friendly interactive targets >= 44px (WCAG 2.5.5 / 2.5.8) */
 button,
 a.button-target,
 input,
@@ -118,13 +133,69 @@ select {
   min-height: 44px;
 }
 
-/* Safe area insets */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.touch-target-lg {
+  min-height: 56px;
+  min-width: 56px;
+}
+
+/* Dynamic Viewport Height (DVH) Utilities */
+.min-h-screen-dvh {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.h-screen-dvh {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Safe Area Insets for Modern Mobile Devices (iOS Dynamic Island & Home Bar) */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.pl-safe {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+.pr-safe {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+.mt-safe {
+  margin-top: env(safe-area-inset-top, 0px);
+}
+
+.mb-safe {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 .safe-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 16px);
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 16px));
 }
 
 .safe-top {
-  padding-top: env(safe-area-inset-top, 16px);
+  padding-top: max(16px, env(safe-area-inset-top, 16px));
+}
+
+/* Smooth Touch Scrolling */
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent Unintended Horizontal Overflow */
+.no-horizontal-overflow {
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 /* Custom Scrollbar */
@@ -132,13 +203,16 @@ select {
   width: 6px;
   height: 6px;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
   background: rgba(100, 116, 139, 0.3);
   border-radius: 4px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(20, 184, 166, 0.6);
 }
@@ -149,12 +223,15 @@ select {
     background: #ffffff !important;
     color: #000000 !important;
   }
+
   .no-print {
     display: none !important;
   }
+
   .print-only {
     display: block !important;
   }
+
   .card-theme {
     background: #ffffff !important;
     border: 1px solid #cccccc !important;

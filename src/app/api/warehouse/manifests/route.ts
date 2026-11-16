@@ -7,8 +7,14 @@ import { z } from 'zod';
 export async function GET() {
   try {
     const session = await getCurrentSession();
-    if (!session || !['WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR', 'ADMIN'].includes(session.role)) {
+    if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (!['WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR'].includes(session.role)) {
+      return NextResponse.json(
+        { error: 'Forbidden: Warehouse operational privileges required.' },
+        { status: 403 }
+      );
     }
 
     if (!session.facilityId) {
@@ -60,9 +66,12 @@ const GenerateManifestSchema = z.object({
 export async function POST(req: NextRequest) {
   try {
     const session = await getCurrentSession();
-    if (!session || !['WAREHOUSE_SUPERVISOR', 'ADMIN'].includes(session.role)) {
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (session.role !== 'WAREHOUSE_SUPERVISOR') {
       return NextResponse.json(
-        { error: 'Only supervisors can generate delivery manifests.' },
+        { error: 'Forbidden: Only supervisors can generate delivery manifests.' },
         { status: 403 }
       );
     }

@@ -41,8 +41,14 @@ export default function FamilyLayout({
         return res.json();
       })
       .then((data) => {
-        if (data?.user) {
-          setUser(data.user);
+        if (!data) return;
+        const role = data?.user?.role || data?.session?.role;
+        if (role === 'FAMILY') {
+          setUser(data.user || data.session);
+        } else if (data.authenticated) {
+          router.push('/access-denied?from=/family&required=FAMILY');
+        } else {
+          router.push('/family/login');
         }
       })
       .catch(() => router.push('/family/login'));
@@ -64,7 +70,7 @@ export default function FamilyLayout({
   ];
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] dark:bg-black text-slate-900 dark:text-white flex flex-col md:flex-row pb-20 md:pb-0 transition-colors duration-200">
+    <div className="min-h-screen min-h-screen-dvh bg-[#f8fafc] dark:bg-black text-slate-900 dark:text-white flex flex-col md:flex-row pb-20 md:pb-0 transition-colors duration-200">
       {/* Sidebar for Tablet & Desktop */}
       <aside className="hidden md:flex flex-col w-60 lg:w-64 border-r border-slate-200 dark:border-[#222222] bg-white dark:bg-[#0c0c0c] p-4 shrink-0 min-h-screen sticky top-0 h-screen justify-between z-30 transition-colors">
         <div>
@@ -82,11 +88,10 @@ export default function FamilyLayout({
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-semibold transition-all ${
-                    isActive
+                  className={`flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-semibold transition-all ${isActive
                       ? 'bg-teal-500 text-white font-bold shadow-sm'
                       : 'text-slate-600 dark:text-neutral-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#181818]'
-                  }`}
+                    }`}
                 >
                   <Icon className="w-4 h-4 shrink-0" />
                   <span>{link.label}</span>
@@ -142,10 +147,11 @@ export default function FamilyLayout({
             <ThemeToggle />
             <button
               onClick={handleLogout}
-              className="md:hidden p-2 rounded-xl bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400"
+              className="md:hidden w-11 h-11 rounded-xl bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 flex items-center justify-center min-w-[44px] min-h-[44px] touch-manipulation"
               title="Logout"
+              aria-label="Log Out"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-5 h-5" />
             </button>
           </div>
         </header>
@@ -155,8 +161,8 @@ export default function FamilyLayout({
         </main>
       </div>
 
-      {/* Mobile Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-[#0c0c0c]/95 backdrop-blur-md border-t border-slate-200 dark:border-[#222222] safe-bottom">
+      {/* Mobile Navigation with Safe Area */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-[#0c0c0c]/95 backdrop-blur-md border-t border-slate-200 dark:border-[#222222] pb-safe safe-bottom">
         <div className="grid grid-cols-3 h-16 items-center px-2">
           {navLinks.map((item) => {
             const Icon = item.icon;
@@ -165,9 +171,8 @@ export default function FamilyLayout({
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex flex-col items-center justify-center py-1 rounded-lg text-[10px] font-medium transition-colors min-h-[44px] ${
-                  isActive ? 'text-teal-600 dark:text-teal-400 font-bold' : 'text-slate-500 dark:text-slate-400'
-                }`}
+                className={`flex flex-col items-center justify-center py-1 rounded-lg text-[10px] font-medium transition-colors min-h-[44px] ${isActive ? 'text-teal-600 dark:text-teal-400 font-bold' : 'text-slate-500 dark:text-slate-400'
+                  }`}
               >
                 <Icon className="w-5 h-5 mb-0.5" />
                 <span>{item.label}</span>
