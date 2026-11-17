@@ -300,7 +300,7 @@ describe('PHASE 8B: RBAC, Session Revocation & Account Lock Security Audit Suite
       // This confirms absolute assignment rather than atomic decrement:
       const before = freshOffender!.balance;
       const orderTotal = 15.0;
-      const computedAfter = before - orderTotal;
+      const computedAfter = Number(before) - orderTotal;
 
       expect(computedAfter).toBe(35.0);
     });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
+import { toMoneyNumber, serializeFacility } from '@/lib/money';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,12 +63,12 @@ export async function GET(req: NextRequest) {
         ordersCount,
         pendingOrdersCount,
         staffCount,
-        totalDepositsVolume: depositsAgg._sum.amount || 0,
-        totalFeesCollected: depositsAgg._sum.fee || 0,
-        totalPaid: depositsAgg._sum.totalPaid || 0,
+        totalDepositsVolume: toMoneyNumber(depositsAgg._sum.amount),
+        totalFeesCollected: toMoneyNumber(depositsAgg._sum.fee),
+        totalPaid: toMoneyNumber(depositsAgg._sum.totalPaid),
       },
       recentAuditLogs,
-      facilities,
+      facilities: facilities.map(serializeFacility),
     });
   } catch (error: any) {
     console.error('Admin stats error:', error);

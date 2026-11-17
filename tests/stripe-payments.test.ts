@@ -354,7 +354,7 @@ describe('Stripe Provider & Webhook Verification Suite', () => {
 
       // Verify balance increased once (82.50 + 25.00 = 107.50)
       const offenderAfterFirst = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-      expect(offenderAfterFirst.balance).toBe(107.50);
+      expect(Number(offenderAfterFirst.balance)).toBe(107.50);
 
       // 3. Deliver Event 2: payment_intent.succeeded (ID is pi_..., but metadata correlates to intent.providerRef)
       const piReq = createSignedStripeRequest({
@@ -383,7 +383,7 @@ describe('Stripe Provider & Webhook Verification Suite', () => {
 
       // Balance must NOT double credit
       const offenderAfterSecond = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-      expect(offenderAfterSecond.balance).toBe(107.50);
+      expect(Number(offenderAfterSecond.balance)).toBe(107.50);
     });
 
     it('RPC SAFETY: Stripe fails closed in Production when process_confirmed_electronic_deposit is missing and NEVER calls legacy TouchPay RPC', async () => {
@@ -437,7 +437,7 @@ describe('Stripe Provider & Webhook Verification Suite', () => {
 
       // Balance must remain unchanged at $82.50
       const offender = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-      expect(offender.balance).toBe(82.50);
+      expect(Number(offender.balance)).toBe(82.50);
 
       // Deposit marked FAILED
       const deposit = await prisma.deposit.findUniqueOrThrow({ where: { providerRef: intent.providerRef } });

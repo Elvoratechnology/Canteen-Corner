@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import prisma from '@/lib/db';
 import { signSession } from '@/lib/auth';
 import { logAuditAction } from '@/lib/audit';
+import { toMoneyNumber } from '@/lib/money';
 import { z } from 'zod';
 
 // Sliding-window IP rate limiter to protect against remote brute-force and Account-Lockout DoS
@@ -143,8 +144,8 @@ export async function POST(req: NextRequest) {
         name: offender.name,
         unit: offender.unit,
         housing: offender.housing,
-        balance: offender.balance,
-        weeklyLimit: offender.weeklyLimit,
+        balance: toMoneyNumber(offender.balance),
+        weeklyLimit: toMoneyNumber(offender.weeklyLimit),
       },
     });
 

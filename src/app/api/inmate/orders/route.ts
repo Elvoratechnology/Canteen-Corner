@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
+import { serializeOrder } from '@/lib/money';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +28,7 @@ export async function GET() {
       },
     });
 
-    return NextResponse.json({ orders });
+    return NextResponse.json({ orders: orders.map(serializeOrder) });
   } catch (error) {
     console.error('Error fetching orders:', error);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });

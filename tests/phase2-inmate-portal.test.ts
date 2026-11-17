@@ -63,8 +63,8 @@ describe('Phase 2: Inmate Portal Ordering & Rule Enforcement', () => {
       }
 
       const balanceBefore = offender.balance;
-      const balanceAfter = Math.round((balanceBefore - orderTotal) * 100) / 100;
-      const newWeeklySpent = Math.round((offender.currentWeeklySpent + orderTotal) * 100) / 100;
+      const balanceAfter = Math.round((Number(balanceBefore) - orderTotal) * 100) / 100;
+      const newWeeklySpent = Math.round((Number(offender.currentWeeklySpent) + orderTotal) * 100) / 100;
 
       await tx.offender.update({
         where: { id: offender.id },
@@ -118,8 +118,8 @@ describe('Phase 2: Inmate Portal Ordering & Rule Enforcement', () => {
 
     // Verify database state
     const updatedOffender = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-    expect(updatedOffender.balance).toBe(67.50);
-    expect(updatedOffender.currentWeeklySpent).toBe(15.00);
+    expect(Number(updatedOffender.balance)).toBe(67.50);
+    expect(Number(updatedOffender.currentWeeklySpent)).toBe(15.00);
 
     // Verify stock was decremented
     const updatedSoap = await prisma.product.findUniqueOrThrow({ where: { sku: 'PC-002' } });
@@ -143,13 +143,13 @@ describe('Phase 2: Inmate Portal Ordering & Rule Enforcement', () => {
     const offender = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
     const orderTotal = 150.00; // Greater than $82.50
 
-    expect(orderTotal > offender.balance).toBe(true);
+    expect(orderTotal > Number(offender.balance)).toBe(true);
 
     let rejected = false;
     try {
-      if (orderTotal > offender.balance) {
+      if (orderTotal > Number(offender.balance)) {
         throw new Error(
-          `Insufficient funds. Order total ($${orderTotal.toFixed(2)}) exceeds your available balance ($${offender.balance.toFixed(2)}).`
+          `Insufficient funds. Order total ($${orderTotal.toFixed(2)}) exceeds your available balance ($${Number(offender.balance).toFixed(2)}).`
         );
       }
     } catch (e: any) {
@@ -160,7 +160,7 @@ describe('Phase 2: Inmate Portal Ordering & Rule Enforcement', () => {
     expect(rejected).toBe(true);
     // Offender balance unchanged
     const currentOffender = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-    expect(currentOffender.balance).toBe(82.50);
+    expect(Number(currentOffender.balance)).toBe(82.50);
   });
 
   it('should reject an order when total exceeds remaining weekly spending limit', async () => {
@@ -175,7 +175,7 @@ describe('Phase 2: Inmate Portal Ordering & Rule Enforcement', () => {
 
     let rejected = false;
     try {
-      if (offender.currentWeeklySpent + orderTotal > offender.weeklyLimit) {
+      if (Number(offender.currentWeeklySpent) + orderTotal > Number(offender.weeklyLimit)) {
         throw new Error(`Weekly spending limit exceeded.`);
       }
     } catch (e: any) {

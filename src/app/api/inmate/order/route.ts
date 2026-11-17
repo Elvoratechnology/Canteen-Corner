@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
 import { logAuditAction } from '@/lib/audit';
+import { toDecimal, toMoneyNumber, toMoneyString, Prisma } from '@/lib/money';
 import { z } from 'zod';
 
 const OrderItemSchema = z.object({
@@ -71,12 +72,12 @@ export async function POST(req: NextRequest) {
 
       const productMap = new Map(products.map((p) => [p.id, p]));
 
-      let calculatedSubtotal = 0;
+      let calculatedSubtotal = toDecimal(0);
       const orderItemsToCreate: Array<{
         productId: string;
         quantity: number;
-        unitPrice: number;
-        totalPrice: number;
+        unitPrice: Prisma.Decimal;
+        totalPrice: Prisma.Decimal;
         name: string;
       }> = [];
 
@@ -97,8 +98,8 @@ export async function POST(req: NextRequest) {
           );
         }
 
-        const itemTotal = Math.round(prod.price * quantity * 100) / 100;
-        calculatedSubtotal += itemTotal;
+        const itemTotal = prod.price.times(quantity);
+        calculatedSubtotal = calculatedSubtotal.plus(itemTotal);
 
         orderItemsToCreate.push({
           productId: prod.id,
@@ -109,21 +110,21 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      calculatedSubtotal = Math.round(calculatedSubtotal * 100) / 100;
       const orderTotal = calculatedSubtotal; // Zero tax on institutional commissary items
 
       // 3. Rule: Block if order total > balance
-      if (orderTotal > offender.balance) {
+      if (orderTotal.greaterThan(offender.balance)) {
         throw new Error(
-          `Insufficient funds. Order total ($${orderTotal.toFixed(2)}) exceeds your available balance ($${offender.balance.toFixed(2)}).`
+          `Insufficient funds. Order total (${toMoneyString(orderTotal, true)}) exceeds your available balance (${toMoneyString(offender.balance, true)}).`
         );
       }
 
       // 4. Rule: Block if weekly spending + order total > weekly limit
-      const remainingWeeklyLimit = Math.max(0, offender.weeklyLimit - offender.currentWeeklySpent);
-      if (offender.currentWeeklySpent + orderTotal > offender.weeklyLimit) {
+      const remainingWeeklyLimit = offender.weeklyLimit.minus(offender.currentWeeklySpent);
+      const safeRemainingLimit = remainingWeeklyLimit.greaterThan(0) ? remainingWeeklyLimit : toDecimal(0);
+      if (offender.currentWeeklySpent.plus(orderTotal).greaterThan(offender.weeklyLimit)) {
         throw new Error(
-          `Weekly spending limit exceeded. Order total ($${orderTotal.toFixed(2)}) exceeds your remaining limit of $${remainingWeeklyLimit.toFixed(2)} ($${offender.weeklyLimit.toFixed(2)}/wk limit).`
+          `Weekly spending limit exceeded. Order total (${toMoneyString(orderTotal, true)}) exceeds your remaining limit of ${toMoneyString(safeRemainingLimit, true)} (${toMoneyString(offender.weeklyLimit, true)}/wk limit).`
         );
       }
 
@@ -187,7 +188,7 @@ export async function POST(req: NextRequest) {
         where: { id: offender.id },
       });
       const balanceAfter = freshOffender.balance;
-      const balanceBefore = Math.round((balanceAfter + orderTotal) * 100) / 100;
+      const balanceBefore = balanceAfter.plus(orderTotal);
       const newWeeklySpent = freshOffender.currentWeeklySpent;
 
       // 8. Create Order record
@@ -197,7 +198,7 @@ export async function POST(req: NextRequest) {
           offenderId: offender.id,
           status: 'PROCESSING',
           subtotal: calculatedSubtotal,
-          tax: 0.0,
+          tax: toDecimal(0.0),
           total: orderTotal,
           expectedDeliveryDate: nextDelivery,
           barcode,
@@ -239,7 +240,7 @@ export async function POST(req: NextRequest) {
           offenderId: offender.id,
           type: 'COMMISSARY_ORDER',
           debit: orderTotal,
-          credit: 0.0,
+          credit: toDecimal(0.0),
           balanceBefore,
           balanceAfter,
           referenceType: 'ORDER',
@@ -254,15 +255,16 @@ export async function POST(req: NextRequest) {
           offenderId: offender.id,
           type: 'ORDER_RECEIVED',
           title: `Order Received (${orderNumber})`,
-          message: `Your commissary order for $${orderTotal.toFixed(2)} has been submitted and is processing for delivery on ${nextDelivery.toLocaleDateString()}.`,
+          message: `Your commissary order for ${toMoneyString(orderTotal, true)} has been submitted and is processing for delivery on ${nextDelivery.toLocaleDateString()}.`,
         },
       });
 
+      const remLimitAfter = offender.weeklyLimit.minus(newWeeklySpent);
       return {
         order: createdOrder,
         balanceBefore,
         balanceAfter,
-        remainingWeeklyLimit: Math.max(0, offender.weeklyLimit - newWeeklySpent),
+        remainingWeeklyLimit: remLimitAfter.greaterThan(0) ? remLimitAfter : toDecimal(0),
       };
     });
 
@@ -275,8 +277,8 @@ export async function POST(req: NextRequest) {
       resourceId: result.order.id,
       metadata: {
         orderNumber: result.order.orderNumber,
-        total: result.order.total,
-        newBalance: result.balanceAfter,
+        total: toMoneyNumber(result.order.total),
+        newBalance: toMoneyNumber(result.balanceAfter),
       },
     });
 
@@ -285,11 +287,11 @@ export async function POST(req: NextRequest) {
       order: {
         id: result.order.id,
         orderNumber: result.order.orderNumber,
-        total: result.order.total,
+        total: toMoneyNumber(result.order.total),
         expectedDeliveryDate: result.order.expectedDeliveryDate.toISOString(),
         status: result.order.status,
-        newBalance: result.balanceAfter,
-        remainingWeeklyLimit: result.remainingWeeklyLimit,
+        newBalance: toMoneyNumber(result.balanceAfter),
+        remainingWeeklyLimit: toMoneyNumber(result.remainingWeeklyLimit),
         itemsCount: result.order.items.length,
       },
     });

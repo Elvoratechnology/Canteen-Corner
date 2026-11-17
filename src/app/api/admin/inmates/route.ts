@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
 import { logAuditAction } from '@/lib/audit';
+import { toDecimal, toMoneyNumber, serializeOffender } from '@/lib/money';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    return NextResponse.json({ offenders });
+    return NextResponse.json({ offenders: offenders.map(serializeOffender) });
   } catch (error) {
     console.error('Admin inmates GET error:', error);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
@@ -111,7 +112,7 @@ export async function PATCH(req: NextRequest) {
 
       const updated = await prisma.offender.update({
         where: { id: offenderId },
-        data: { weeklyLimit: newWeeklyLimit },
+        data: { weeklyLimit: toDecimal(newWeeklyLimit!) },
       });
 
       await logAuditAction({
@@ -120,10 +121,10 @@ export async function PATCH(req: NextRequest) {
         actorRole: session.role,
         resourceType: 'OFFENDER',
         resourceId: offenderId,
-        metadata: { previousLimit: offender.weeklyLimit, newLimit: newWeeklyLimit, reason },
+        metadata: { previousLimit: toMoneyNumber(offender.weeklyLimit), newLimit: newWeeklyLimit, reason },
       });
 
-      return NextResponse.json({ success: true, offender: updated });
+      return NextResponse.json({ success: true, offender: serializeOffender(updated) });
     }
 
     if (action === 'ADJUST_BALANCE') {
@@ -133,20 +134,21 @@ export async function PATCH(req: NextRequest) {
 
       const isCredit = amount > 0;
       const absAmount = Math.abs(amount);
+      const absDecimal = toDecimal(absAmount);
 
-      let previousBalance = 0;
-      let calculatedNewBalance = 0;
+      let previousBalance = toDecimal(0);
+      let calculatedNewBalance = toDecimal(0);
 
       const updated = await prisma.$transaction(async (tx) => {
         if (!isCredit) {
-          // Atomic conditional decrement: only deducts if balance >= absAmount
+          // Atomic conditional decrement: only deducts if balance >= absDecimal
           const updateResult = await tx.offender.updateMany({
             where: {
               id: offenderId,
-              balance: { gte: absAmount },
+              balance: { gte: absDecimal },
             },
             data: {
-              balance: { decrement: absAmount },
+              balance: { decrement: absDecimal },
             },
           });
 
@@ -158,7 +160,7 @@ export async function PATCH(req: NextRequest) {
           await tx.offender.update({
             where: { id: offenderId },
             data: {
-              balance: { increment: absAmount },
+              balance: { increment: absDecimal },
             },
           });
         }
@@ -170,16 +172,16 @@ export async function PATCH(req: NextRequest) {
 
         calculatedNewBalance = off.balance;
         previousBalance = isCredit
-          ? Math.round((calculatedNewBalance - absAmount) * 100) / 100
-          : Math.round((calculatedNewBalance + absAmount) * 100) / 100;
+          ? calculatedNewBalance.minus(absDecimal)
+          : calculatedNewBalance.plus(absDecimal);
 
         // Atomically create corresponding double-entry ledger entry
         await tx.ledgerEntry.create({
           data: {
             offenderId,
             type: 'ADJUSTMENT',
-            credit: isCredit ? absAmount : 0,
-            debit: !isCredit ? absAmount : 0,
+            credit: isCredit ? absDecimal : toDecimal(0),
+            debit: !isCredit ? absDecimal : toDecimal(0),
             balanceBefore: previousBalance,
             balanceAfter: calculatedNewBalance,
             referenceType: 'MANUAL',
@@ -198,10 +200,15 @@ export async function PATCH(req: NextRequest) {
         actorRole: session.role,
         resourceType: 'OFFENDER',
         resourceId: offenderId,
-        metadata: { previousBalance, adjustment: amount, newBalance: calculatedNewBalance, reason },
+        metadata: {
+          previousBalance: toMoneyNumber(previousBalance),
+          adjustment: amount,
+          newBalance: toMoneyNumber(calculatedNewBalance),
+          reason,
+        },
       });
 
-      return NextResponse.json({ success: true, offender: updated });
+      return NextResponse.json({ success: true, offender: serializeOffender(updated) });
     }
 
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
@@ -276,23 +283,24 @@ export async function POST(req: NextRequest) {
           unit,
           housing,
           pinHash,
-          balance: initialBalance,
-          weeklyLimit: weeklyLimit || facility.maxWeeklySpend || 100.0,
-          currentWeeklySpent: 0.0,
+          balance: toDecimal(initialBalance),
+          weeklyLimit: toDecimal(weeklyLimit || facility.maxWeeklySpend || 100.0),
+          currentWeeklySpent: toDecimal(0.0),
         },
         include: { facility: true },
       });
 
       // 3. Create initial ledger entry if initialBalance > 0
       if (initialBalance > 0) {
+        const initDecimal = toDecimal(initialBalance);
         await tx.ledgerEntry.create({
           data: {
             offenderId: off.id,
             type: 'DEPOSIT',
-            credit: initialBalance,
-            debit: 0.0,
-            balanceBefore: 0.0,
-            balanceAfter: initialBalance,
+            credit: initDecimal,
+            debit: toDecimal(0.0),
+            balanceBefore: toDecimal(0.0),
+            balanceAfter: initDecimal,
             referenceType: 'MANUAL',
             referenceId: `INIT-DEP-${Date.now()}`,
             description: `Initial inmate commissary balance provisioned by Administrator`,
@@ -312,7 +320,7 @@ export async function POST(req: NextRequest) {
       metadata: { name, facilityId, unit, housing, initialBalance },
     });
 
-    return NextResponse.json({ success: true, offender }, { status: 201 });
+    return NextResponse.json({ success: true, offender: serializeOffender(offender) }, { status: 201 });
   } catch (error: any) {
     console.error('Admin inmates POST error:', error);
     return NextResponse.json({ error: error.message || 'Server error' }, { status: 500 });

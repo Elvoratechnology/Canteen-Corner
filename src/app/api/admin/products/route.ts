@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
 import { logAuditAction } from '@/lib/audit';
+import { toDecimal, toMoneyNumber, serializeProduct } from '@/lib/money';
 import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    return NextResponse.json({ products });
+    return NextResponse.json({ products: products.map(serializeProduct) });
   } catch (error) {
     console.error('Admin products GET error:', error);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest) {
         sku: sku.toUpperCase(),
         name,
         category,
-        price,
+        price: toDecimal(price),
         stock,
         reorderLevel,
         description,
@@ -80,10 +81,10 @@ export async function POST(req: NextRequest) {
       actorRole: session.role,
       resourceType: 'PRODUCT',
       resourceId: product.id,
-      metadata: { sku: product.sku, name: product.name, price: product.price, stock: product.stock },
+      metadata: { sku: product.sku, name: product.name, price: toMoneyNumber(product.price), stock: product.stock },
     });
 
-    return NextResponse.json({ success: true, product });
+    return NextResponse.json({ success: true, product: serializeProduct(product) });
   } catch (error: any) {
     console.error('Admin products POST error:', error);
     return NextResponse.json({ error: error.message || 'Server error' }, { status: 500 });
@@ -121,7 +122,7 @@ export async function PATCH(req: NextRequest) {
     const updated = await prisma.product.update({
       where: { id },
       data: {
-        ...(price !== undefined ? { price } : {}),
+        ...(price !== undefined ? { price: toDecimal(price) } : {}),
         ...(stock !== undefined ? { stock } : {}),
         ...(reorderLevel !== undefined ? { reorderLevel } : {}),
         ...(active !== undefined ? { active } : {}),
@@ -134,10 +135,10 @@ export async function PATCH(req: NextRequest) {
       actorRole: session.role,
       resourceType: 'PRODUCT',
       resourceId: id,
-      metadata: { sku: existing.sku, previousStock: existing.stock, newStock: updated.stock, previousPrice: existing.price, newPrice: updated.price },
+      metadata: { sku: existing.sku, previousStock: existing.stock, newStock: updated.stock, previousPrice: toMoneyNumber(existing.price), newPrice: toMoneyNumber(updated.price) },
     });
 
-    return NextResponse.json({ success: true, product: updated });
+    return NextResponse.json({ success: true, product: serializeProduct(updated) });
   } catch (error: any) {
     console.error('Admin products PATCH error:', error);
     return NextResponse.json({ error: error.message || 'Server error' }, { status: 500 });

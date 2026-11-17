@@ -1,5 +1,6 @@
 import prisma from '@/lib/db';
 import { logAuditAction } from '@/lib/audit';
+import { toDecimal, toMoneyNumber, toMoneyString } from '@/lib/money';
 
 export interface ProcessConfirmationOptions {
   providerRef: string;
@@ -209,12 +210,11 @@ export async function processVerifiedDepositConfirmation(
       throw new Error(`Idempotency key mismatch for provider reference ${providerRef}.`);
     }
 
-    // Amount Precision and Integrity Verification using exact integer cents
+    // Amount Precision and Integrity Verification using exact Decimal comparison
     if (verifiedAmount !== undefined) {
-      const depositCents = Math.round(deposit.amount * 100);
-      const verifiedCents = Math.round(verifiedAmount * 100);
+      const verifiedDecimal = toDecimal(verifiedAmount);
 
-      if (depositCents !== verifiedCents) {
+      if (!deposit.amount.equals(verifiedDecimal)) {
         await tx.deposit.update({
           where: { id: deposit.id },
           data: { status: 'FAILED' },
@@ -228,10 +228,8 @@ export async function processVerifiedDepositConfirmation(
             resourceType: 'DEPOSIT',
             resourceId: providerRef,
             metadata: JSON.stringify({
-              recordedAmount: deposit.amount,
+              recordedAmount: toMoneyNumber(deposit.amount),
               verifiedAmount,
-              recordedCents: depositCents,
-              verifiedCents,
               provider: deposit.provider,
               reason: 'Amount mismatch between recorded deposit intent and verified gateway payload',
             }),
@@ -241,14 +239,14 @@ export async function processVerifiedDepositConfirmation(
         return {
           success: false,
           alreadyProcessed: false,
-          message: `SECURITY ALERT: Verified amount ($${verifiedAmount.toFixed(2)}) does not match deposit intent ($${deposit.amount.toFixed(2)}). Deposit marked FAILED.`,
+          message: `SECURITY ALERT: Verified amount (${toMoneyString(verifiedDecimal, true)}) does not match deposit intent (${toMoneyString(deposit.amount, true)}). Deposit marked FAILED.`,
         };
       }
     }
 
     // Facility Deposit Limit Verification
-    const maxDeposit = deposit.offender.facility?.maxDepositAmount ?? 300.0;
-    if (deposit.amount > maxDeposit) {
+    const maxDeposit = deposit.offender.facility?.maxDepositAmount ?? toDecimal(300.0);
+    if (deposit.amount.greaterThan(maxDeposit)) {
       await tx.deposit.update({
         where: { id: deposit.id },
         data: { status: 'FAILED' },
@@ -257,7 +255,7 @@ export async function processVerifiedDepositConfirmation(
       return {
         success: false,
         alreadyProcessed: false,
-        message: `Deposit amount ($${deposit.amount.toFixed(2)}) exceeds facility maximum deposit limit ($${maxDeposit.toFixed(2)}).`,
+        message: `Deposit amount (${toMoneyString(deposit.amount, true)}) exceeds facility maximum deposit limit (${toMoneyString(maxDeposit, true)}).`,
       };
     }
 
@@ -296,7 +294,7 @@ export async function processVerifiedDepositConfirmation(
       where: { id: offender.id },
     });
     const balanceAfter = freshOffender.balance;
-    const balanceBefore = Math.round((balanceAfter - creditAmount) * 100) / 100;
+    const balanceBefore = balanceAfter.minus(creditAmount);
 
     // 3. Double-entry Ledger Entry
     const providerLabel = deposit.provider === 'STRIPE' ? 'Stripe' : deposit.provider === 'PAYPAL' ? 'PayPal' : 'Electronic';
@@ -304,7 +302,7 @@ export async function processVerifiedDepositConfirmation(
       data: {
         offenderId: offender.id,
         type: 'DEPOSIT',
-        debit: 0.0,
+        debit: toDecimal(0.0),
         credit: creditAmount,
         balanceBefore,
         balanceAfter,
@@ -321,8 +319,8 @@ export async function processVerifiedDepositConfirmation(
       data: {
         offenderId: offender.id,
         type: 'DEPOSIT_RECEIVED',
-        title: `${providerLabel} Funds Received ($${creditAmount.toFixed(2)})`,
-        message: `$${creditAmount.toFixed(2)} has been deposited into your trust account via ${providerLabel} (Ref: ${deposit.providerRef}). Your new balance is $${balanceAfter.toFixed(2)}.`,
+        title: `${providerLabel} Funds Received (${toMoneyString(creditAmount, true)})`,
+        message: `${toMoneyString(creditAmount, true)} has been deposited into your trust account via ${providerLabel} (Ref: ${deposit.providerRef}). Your new balance is ${toMoneyString(balanceAfter, true)}.`,
       },
     });
 
@@ -335,11 +333,11 @@ export async function processVerifiedDepositConfirmation(
         resourceType: 'DEPOSIT',
         resourceId: providerRef,
         metadata: JSON.stringify({
-          amount: creditAmount,
+          amount: toMoneyNumber(creditAmount),
           currency: 'USD',
           provider: deposit.provider,
           offenderId: offender.id,
-          newBalance: balanceAfter,
+          newBalance: toMoneyNumber(balanceAfter),
         }),
       },
     });
@@ -347,7 +345,7 @@ export async function processVerifiedDepositConfirmation(
     return {
       success: true,
       alreadyProcessed: false,
-      message: `Successfully credited $${creditAmount.toFixed(2)} to inmate ${offender.name} (${offender.id}).`,
+      message: `Successfully credited ${toMoneyString(creditAmount, true)} to inmate ${offender.name} (${offender.id}).`,
     };
   });
 }

@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import prisma from '@/lib/db';
+import { toDecimal, toMoneyNumber } from '@/lib/money';
 import { IPaymentProvider, PaymentIntentRequest, PaymentIntentResponse, WebhookVerificationResult, PaymentWebhookPayload } from './types';
 import { processVerifiedDepositConfirmation } from './confirmation';
 import { isTimestampWithinTolerance } from './crypto';
@@ -32,8 +33,9 @@ export class PayPalProvider implements IPaymentProvider {
       }
     }
 
-    const fee = 3.50;
-    const totalPaid = Math.round((req.amount + fee) * 100) / 100;
+    const feeDecimal = toDecimal(3.50);
+    const amountDecimal = toDecimal(req.amount);
+    const totalPaidDecimal = amountDecimal.plus(feeDecimal);
 
     // Unique PayPal Order Reference: ORDER-PAYPAL-xxxxxx
     const timestampSuffix = Date.now().toString().slice(-6);
@@ -45,9 +47,9 @@ export class PayPalProvider implements IPaymentProvider {
       data: {
         offenderId: req.offenderId,
         familyAccountId: req.familyAccountId || null,
-        amount: req.amount,
-        fee,
-        totalPaid,
+        amount: amountDecimal,
+        fee: feeDecimal,
+        totalPaid: totalPaidDecimal,
         currency: 'USD',
         provider: 'PAYPAL',
         providerRef,
@@ -62,9 +64,9 @@ export class PayPalProvider implements IPaymentProvider {
       provider: 'PAYPAL',
       providerRef,
       status: 'PENDING',
-      amount: req.amount,
-      fee,
-      totalPaid,
+      amount: toMoneyNumber(amountDecimal),
+      fee: toMoneyNumber(feeDecimal),
+      totalPaid: toMoneyNumber(totalPaidDecimal),
       checkoutUrl,
       instructions: 'Secure Electronic Deposit via PayPal',
     };

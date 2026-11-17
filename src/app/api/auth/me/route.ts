@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/auth';
 import prisma from '@/lib/db';
+import { serializeOffender } from '@/lib/money';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +28,7 @@ export async function GET() {
       return NextResponse.json({
         authenticated: true,
         session,
-        offender: safeOffender,
+        offender: serializeOffender(safeOffender),
       });
     }
 

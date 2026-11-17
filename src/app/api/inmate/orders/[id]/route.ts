@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
+import { serializeOrder } from '@/lib/money';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +40,7 @@ export async function GET(
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ order });
+    return NextResponse.json({ order: serializeOrder(order) });
   } catch (error) {
     console.error('Error fetching order detail:', error);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });

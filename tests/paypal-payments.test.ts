@@ -421,7 +421,7 @@ describe('PayPal Provider & Webhook Verification Suite', () => {
 
       // Balance must remain unchanged at $82.50
       const offender = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-      expect(offender.balance).toBe(82.50);
+      expect(Number(offender.balance)).toBe(82.50);
 
       // Deposit marked FAILED
       const deposit = await prisma.deposit.findUniqueOrThrow({ where: { providerRef: intent.providerRef } });

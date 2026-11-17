@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
 import { logAuditAction } from '@/lib/audit';
+import { toDecimal, toMoneyNumber, serializeProduct, serializeGiftPackage } from '@/lib/money';
 import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
@@ -56,8 +57,8 @@ export async function GET() {
 
     return NextResponse.json({
       giftPackagesEnabled,
-      packages,
-      approvedProducts,
+      packages: packages.map(serializeGiftPackage),
+      approvedProducts: approvedProducts.map(serializeProduct),
     });
   } catch (error) {
     console.error('Error fetching gift packages:', error);
@@ -133,21 +134,22 @@ export async function POST(req: NextRequest) {
     });
 
     const productMap = new Map(products.map((p) => [p.id, p]));
-    let totalValue = 0;
+    let totalValue = toDecimal(0);
     const itemDetails = items.map((i) => {
       const prod = productMap.get(i.productId);
-      const price = prod?.price || 0;
-      totalValue += price * i.quantity;
+      const price = prod?.price || toDecimal(0);
+      const itemSubtotal = price.times(i.quantity);
+      totalValue = totalValue.plus(itemSubtotal);
       return {
         productId: i.productId,
         name: prod?.name || 'Item',
         quantity: i.quantity,
-        price,
-        subtotal: price * i.quantity,
+        price: toMoneyNumber(price),
+        subtotal: toMoneyNumber(itemSubtotal),
       };
     });
 
-    totalValue = Math.round(totalValue * 100) / 100;
+
 
     const createdPackage = await prisma.giftPackage.create({
       data: {
@@ -166,12 +168,12 @@ export async function POST(req: NextRequest) {
       actorRole: 'FAMILY',
       resourceType: 'GIFT_PACKAGE',
       resourceId: createdPackage.id,
-      metadata: { offenderId: offender.id, totalValue },
+      metadata: { offenderId: offender.id, totalValue: toMoneyNumber(totalValue) },
     });
 
     return NextResponse.json({
       success: true,
-      giftPackage: createdPackage,
+      giftPackage: serializeGiftPackage(createdPackage),
       message: 'Gift package submitted and queued for facility staff inspection and approval.',
     });
   } catch (error: any) {

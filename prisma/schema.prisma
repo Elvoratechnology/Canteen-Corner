@@ -12,8 +12,8 @@ model Facility {
   name                String
   weeklyResetDay      Int        @default(0) // 0 = Sunday, 1 = Monday, etc.
   giftPackagesEnabled Boolean    @default(true)
-  maxWeeklySpend      Float      @default(100.0)
-  maxDepositAmount    Float      @default(300.0)
+  maxWeeklySpend      Decimal    @default(100.00)
+  maxDepositAmount    Decimal    @default(300.00)
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
   offenders           Offender[]
@@ -51,9 +51,9 @@ model Offender {
   unit               String
   housing            String
   pinHash            String
-  balance            Float           @default(0.0)
-  weeklyLimit        Float           @default(100.0)
-  currentWeeklySpent Float           @default(0.0)
+  balance            Decimal         @default(0.00)
+  weeklyLimit        Decimal         @default(100.00)
+  currentWeeklySpent Decimal         @default(0.00)
   lastWeeklyReset    DateTime        @default(now())
   failedPinAttempts  Int             @default(0)
   pinLockedUntil     DateTime?
@@ -88,7 +88,7 @@ model Product {
   sku          String      @unique
   name         String
   category     String      // Snacks, Beverages, Personal Care, Stationery, Health & Wellness
-  price        Float
+  price        Decimal
   stock        Int
   reorderLevel Int         @default(15)
   active       Boolean     @default(true)
@@ -106,9 +106,9 @@ model Order {
   orderNumber          String               @unique // Format #CC-xxxxx
   offenderId           String
   status               String               @default("PROCESSING") // PROCESSING, PACKED, OUT_FOR_DELIVERY, DELIVERED, CANCELLED
-  subtotal             Float
-  tax                  Float                @default(0.0)
-  total                Float
+  subtotal             Decimal
+  tax                  Decimal              @default(0.00)
+  total                Decimal
   expectedDeliveryDate DateTime
   deliveredAt          DateTime?
   pickedByStaffId      String?
@@ -129,8 +129,8 @@ model OrderItem {
   orderId    String
   productId  String
   quantity   Int
-  unitPrice  Float
-  totalPrice Float
+  unitPrice  Decimal
+  totalPrice Decimal
   order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product    Product  @relation(fields: [productId], references: [id])
 }
@@ -150,9 +150,9 @@ model Deposit {
   id              String         @id @default(cuid())
   offenderId      String
   familyAccountId String?
-  amount          Float
-  fee             Float          @default(0.0)
-  totalPaid       Float
+  amount          Decimal
+  fee             Decimal        @default(0.00)
+  totalPaid       Decimal
   currency        String         @default("USD")
   provider        String         @default("STRIPE") // STRIPE or PAYPAL
   providerRef     String         @unique
@@ -168,10 +168,10 @@ model LedgerEntry {
   id            String   @id @default(cuid())
   offenderId    String
   type          String   // DEPOSIT, COMMISSARY_ORDER, REFUND, INVENTORY_RESTOCK, ADJUSTMENT
-  debit         Float    @default(0.0) // Deducted from inmate balance
-  credit        Float    @default(0.0) // Added to inmate balance
-  balanceBefore Float
-  balanceAfter  Float
+  debit         Decimal  @default(0.00) // Deducted from inmate balance
+  credit        Decimal  @default(0.00) // Added to inmate balance
+  balanceBefore Decimal
+  balanceAfter  Decimal
   referenceType String   // ORDER, DEPOSIT, MANUAL
   referenceId   String
   description   String
@@ -185,7 +185,7 @@ model GiftPackage {
   familyAccountId String
   packageName     String
   itemsJson       String        // JSON array of items and quantities
-  totalValue      Float
+  totalValue      Decimal
   status          String        @default("PENDING") // PENDING, APPROVED, REJECTED, SHIPPED
   reviewerId      String?
   reviewerNotes   String?

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
 import { logAuditAction } from '@/lib/audit';
+import { toDecimal, serializeFacility } from '@/lib/money';
 import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    return NextResponse.json({ facilities });
+    return NextResponse.json({ facilities: facilities.map(serializeFacility) });
   } catch (error) {
     console.error('Admin facilities GET error:', error);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
@@ -61,8 +62,8 @@ export async function PATCH(req: NextRequest) {
     const updated = await prisma.facility.update({
       where: { id },
       data: {
-        ...(maxWeeklySpend !== undefined ? { maxWeeklySpend } : {}),
-        ...(maxDepositAmount !== undefined ? { maxDepositAmount } : {}),
+        ...(maxWeeklySpend !== undefined ? { maxWeeklySpend: toDecimal(maxWeeklySpend) } : {}),
+        ...(maxDepositAmount !== undefined ? { maxDepositAmount: toDecimal(maxDepositAmount) } : {}),
         ...(weeklyResetDay !== undefined ? { weeklyResetDay } : {}),
         ...(giftPackagesEnabled !== undefined ? { giftPackagesEnabled } : {}),
       },
@@ -77,7 +78,7 @@ export async function PATCH(req: NextRequest) {
       metadata: { previous: existing, updated },
     });
 
-    return NextResponse.json({ success: true, facility: updated });
+    return NextResponse.json({ success: true, facility: serializeFacility(updated) });
   } catch (error: any) {
     console.error('Admin facilities PATCH error:', error);
     return NextResponse.json({ error: error.message || 'Server error' }, { status: 500 });

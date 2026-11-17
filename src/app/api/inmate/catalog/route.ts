@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma, { caseInsensitiveContains } from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
+import { serializeProduct } from '@/lib/money';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,7 +75,7 @@ export async function GET(req: NextRequest) {
     ];
 
     return NextResponse.json({
-      products,
+      products: products.map(serializeProduct),
       categories,
     });
   } catch (error) {

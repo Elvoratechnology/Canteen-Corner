@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
+import { serializeDeposit } from '@/lib/money';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +36,7 @@ export async function GET() {
       },
     });
 
-    return NextResponse.json({ deposits });
+    return NextResponse.json({ deposits: deposits.map(serializeDeposit) });
   } catch (error) {
     console.error('Error fetching family deposits:', error);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });

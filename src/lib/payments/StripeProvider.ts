@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import prisma from '@/lib/db';
+import { toDecimal, toMoneyNumber } from '@/lib/money';
 import { IPaymentProvider, PaymentIntentRequest, PaymentIntentResponse, WebhookVerificationResult, PaymentWebhookPayload } from './types';
 import { processVerifiedDepositConfirmation } from './confirmation';
 import { verifyHmacSha256Signature, isTimestampWithinTolerance } from './crypto';
@@ -30,8 +31,9 @@ export class StripeProvider implements IPaymentProvider {
     }
 
     // Standard card processing fee: $3.50 flat institutional electronic processing fee
-    const fee = 3.50;
-    const totalPaid = Math.round((req.amount + fee) * 100) / 100;
+    const feeDecimal = toDecimal(3.50);
+    const amountDecimal = toDecimal(req.amount);
+    const totalPaidDecimal = amountDecimal.plus(feeDecimal);
 
     // Generate unique Stripe Checkout Session / Payment Intent reference
     const timestampSuffix = Date.now().toString().slice(-6);
@@ -43,9 +45,9 @@ export class StripeProvider implements IPaymentProvider {
       data: {
         offenderId: req.offenderId,
         familyAccountId: req.familyAccountId || null,
-        amount: req.amount,
-        fee,
-        totalPaid,
+        amount: amountDecimal,
+        fee: feeDecimal,
+        totalPaid: totalPaidDecimal,
         provider: 'STRIPE',
         providerRef,
         status: 'PENDING',
@@ -79,9 +81,9 @@ export class StripeProvider implements IPaymentProvider {
       provider: 'STRIPE',
       providerRef,
       status: 'PENDING',
-      amount: req.amount,
-      fee,
-      totalPaid,
+      amount: toMoneyNumber(amountDecimal),
+      fee: toMoneyNumber(feeDecimal),
+      totalPaid: toMoneyNumber(totalPaidDecimal),
       checkoutUrl,
       clientSecret: `pi_sec_${randomHex}`,
       instructions: 'Secure Credit/Debit Card Deposit via Stripe',

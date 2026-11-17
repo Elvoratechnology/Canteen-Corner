@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
+import { toDecimal, toMoneyNumber } from '@/lib/money';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,20 +34,21 @@ export async function GET() {
       return NextResponse.json({ error: 'Offender not found' }, { status: 404 });
     }
 
-    const remainingLimit = Math.max(0, offender.weeklyLimit - offender.currentWeeklySpent);
-    const availableSpending = Math.min(offender.balance, remainingLimit);
+    const remLimit = offender.weeklyLimit.minus(offender.currentWeeklySpent);
+    const remainingLimit = remLimit.greaterThan(0) ? remLimit : toDecimal(0);
+    const availableSpending = offender.balance.lessThan(remainingLimit) ? offender.balance : remainingLimit;
 
     const lastDeposit = offender.deposits[0] || null;
 
     return NextResponse.json({
-      currentBalance: offender.balance,
-      weeklyLimit: offender.weeklyLimit,
-      currentWeeklySpent: offender.currentWeeklySpent,
-      remainingLimit,
-      availableSpending,
+      currentBalance: toMoneyNumber(offender.balance),
+      weeklyLimit: toMoneyNumber(offender.weeklyLimit),
+      currentWeeklySpent: toMoneyNumber(offender.currentWeeklySpent),
+      remainingLimit: toMoneyNumber(remainingLimit),
+      availableSpending: toMoneyNumber(availableSpending),
       lastDeposit: lastDeposit
         ? {
-            amount: lastDeposit.amount,
+            amount: toMoneyNumber(lastDeposit.amount),
             date: lastDeposit.createdAt.toISOString(),
             providerRef: lastDeposit.providerRef,
           }
@@ -54,10 +56,10 @@ export async function GET() {
       ledgerEntries: offender.ledgerEntries.map((l) => ({
         id: l.id,
         type: l.type,
-        debit: l.debit,
-        credit: l.credit,
-        balanceBefore: l.balanceBefore,
-        balanceAfter: l.balanceAfter,
+        debit: toMoneyNumber(l.debit),
+        credit: toMoneyNumber(l.credit),
+        balanceBefore: toMoneyNumber(l.balanceBefore),
+        balanceAfter: toMoneyNumber(l.balanceAfter),
         description: l.description,
         referenceId: l.referenceId,
         date: l.createdAt.toISOString(),
@@ -68,4 +70,3 @@ export async function GET() {
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 }
-

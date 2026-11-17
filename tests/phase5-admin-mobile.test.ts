@@ -242,7 +242,7 @@ describe('Phase 5: Admin Portal Mobile Optimization & RBAC Security Suite', () =
       vi.mocked(auth.getCurrentSession).mockResolvedValue(adminSession);
       expect(testOffender).toBeDefined();
 
-      const initialBalance = testOffender.balance;
+      const initialBalance = Number(testOffender.balance);
       const adjustmentAmount = 10.0; // Credit $10.00
       const auditReason = 'Phase 5 automated test ledger adjustment verification';
 
@@ -273,9 +273,9 @@ describe('Phase 5: Admin Portal Mobile Optimization & RBAC Security Suite', () =
 
       expect(ledgerEntry).toBeDefined();
       expect(ledgerEntry?.type).toBe('ADJUSTMENT');
-      expect(ledgerEntry?.credit).toBeCloseTo(adjustmentAmount, 2);
-      expect(ledgerEntry?.balanceBefore).toBeCloseTo(initialBalance, 2);
-      expect(ledgerEntry?.balanceAfter).toBeCloseTo(initialBalance + adjustmentAmount, 2);
+      expect(Number(ledgerEntry?.credit)).toBeCloseTo(adjustmentAmount, 2);
+      expect(Number(ledgerEntry?.balanceBefore)).toBeCloseTo(initialBalance, 2);
+      expect(Number(ledgerEntry?.balanceAfter)).toBeCloseTo(initialBalance + adjustmentAmount, 2);
 
       // Verify audit log record
       const auditLog = await prisma.auditLog.findFirst({
@@ -305,7 +305,7 @@ describe('Phase 5: Admin Portal Mobile Optimization & RBAC Security Suite', () =
       vi.mocked(auth.getCurrentSession).mockResolvedValue(adminSession);
       expect(testOffender).toBeDefined();
 
-      const currentBalance = testOffender.balance;
+      const currentBalance = Number(testOffender.balance);
       // An overdraft amount greater than current balance
       const excessiveDebit = -(currentBalance + 50.0);
 
@@ -329,7 +329,7 @@ describe('Phase 5: Admin Portal Mobile Optimization & RBAC Security Suite', () =
       const unchangedOffender = await prisma.offender.findUnique({
         where: { id: testOffender.id },
       });
-      expect(unchangedOffender?.balance).toBeCloseTo(currentBalance, 2);
+      expect(Number(unchangedOffender?.balance)).toBeCloseTo(currentBalance, 2);
 
       // Verify no ledger entry was created for this failed attempt
       const orphanLedger = await prisma.ledgerEntry.findFirst({

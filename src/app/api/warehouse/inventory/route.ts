@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
 import { logAuditAction } from '@/lib/audit';
+import { serializeProduct, serializeOrder } from '@/lib/money';
 import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
@@ -54,12 +55,12 @@ export async function GET() {
             items: { where: { productId: prod.id } },
           },
         });
-        return { productId: prod.id, productName: prod.name, affectedOrders: affected };
+        return { productId: prod.id, productName: prod.name, affectedOrders: affected.map(serializeOrder) };
       })
     );
 
     return NextResponse.json({
-      products,
+      products: products.map(serializeProduct),
       shortages: shortages.map((s) => ({
         id: s.id,
         sku: s.sku,

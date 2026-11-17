@@ -17,8 +17,8 @@ describe('Phase 1: Foundation, Seed Data & Authentication Verification', () => {
 
     expect(offender).toBeDefined();
     expect(offender?.name).toBe('John Smith');
-    expect(offender?.balance).toBe(82.50);
-    expect(offender?.weeklyLimit).toBe(100.00);
+    expect(Number(offender?.balance)).toBe(82.50);
+    expect(Number(offender?.weeklyLimit)).toBe(100.00);
     expect(offender?.unit).toBe('Unit 4');
 
     const pinMatch = await bcrypt.compare('1234', offender!.pinHash);
@@ -36,7 +36,7 @@ describe('Phase 1: Foundation, Seed Data & Authentication Verification', () => {
     expect(products.length).toBe(9);
 
     const priceMap = products.reduce((acc, p) => {
-      acc[p.name] = p.price;
+      acc[p.name] = Number(p.price);
       return acc;
     }, {} as Record<string, number>);
 
@@ -61,7 +61,7 @@ describe('Phase 1: Foundation, Seed Data & Authentication Verification', () => {
     expect(orders.length).toBe(3);
 
     const orderTotals = orders.reduce((acc, o) => {
-      acc[o.orderNumber] = o.total;
+      acc[o.orderNumber] = Number(o.total);
       return acc;
     }, {} as Record<string, number>);
 
@@ -105,7 +105,7 @@ describe('Phase 1: Foundation, Seed Data & Authentication Verification', () => {
     });
     expect(entries.length).toBeGreaterThanOrEqual(1);
     const initialEntry = entries[0];
-    expect(initialEntry.credit).toBe(82.50);
-    expect(initialEntry.balanceAfter).toBe(82.50);
+    expect(Number(initialEntry.credit)).toBe(82.50);
+    expect(Number(initialEntry.balanceAfter)).toBe(82.50);
   });
 });

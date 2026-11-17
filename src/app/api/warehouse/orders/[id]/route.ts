@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
 import { logAuditAction } from '@/lib/audit';
+import { serializeOrder } from '@/lib/money';
 import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
@@ -51,7 +52,7 @@ export async function GET(
       return NextResponse.json({ error: 'Access denied: Order belongs to another facility.' }, { status: 403 });
     }
 
-    return NextResponse.json({ order });
+    return NextResponse.json({ order: serializeOrder(order) });
   } catch (error) {
     console.error('Error fetching order detail:', error);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
@@ -231,7 +232,7 @@ export async function PATCH(
       metadata: { orderId: order.id, orderNumber: order.orderNumber, newStatus },
     });
 
-    return NextResponse.json({ success: true, order: updatedOrder });
+    return NextResponse.json({ success: true, order: serializeOrder(updatedOrder) });
   } catch (error: any) {
     console.error('Error updating order status:', error);
     return NextResponse.json(

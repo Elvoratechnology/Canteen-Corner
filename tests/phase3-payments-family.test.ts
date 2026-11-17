@@ -43,7 +43,7 @@ describe('Phase 3: Electronic Payments (Stripe/PayPal) & Family Portal Verificat
 
     // Inmate balance must NOT be credited yet
     const offender = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-    expect(offender.balance).toBe(82.50);
+    expect(Number(offender.balance)).toBe(82.50);
   });
 
   it('should credit inmate account only upon confirmed success and record in double-entry ledger', async () => {
@@ -63,7 +63,7 @@ describe('Phase 3: Electronic Payments (Stripe/PayPal) & Family Portal Verificat
 
     // Offender balance must increase by $25.00 (from 82.50 to 107.50)
     const offender = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-    expect(offender.balance).toBe(107.50);
+    expect(Number(offender.balance)).toBe(107.50);
 
     // Deposit must be SUCCEEDED
     const deposit = await prisma.deposit.findUniqueOrThrow({ where: { providerRef: intent.providerRef } });
@@ -76,9 +76,9 @@ describe('Phase 3: Electronic Payments (Stripe/PayPal) & Family Portal Verificat
     });
     expect(ledger).toBeDefined();
     expect(ledger?.type).toBe('DEPOSIT');
-    expect(ledger?.credit).toBe(25.00);
-    expect(ledger?.balanceBefore).toBe(82.50);
-    expect(ledger?.balanceAfter).toBe(107.50);
+    expect(Number(ledger?.credit)).toBe(25.00);
+    expect(Number(ledger?.balanceBefore)).toBe(82.50);
+    expect(Number(ledger?.balanceAfter)).toBe(107.50);
   });
 
   it('should enforce idempotency and prevent double-crediting if confirmation is triggered multiple times', async () => {
@@ -95,7 +95,7 @@ describe('Phase 3: Electronic Payments (Stripe/PayPal) & Family Portal Verificat
     // 1st confirmation
     await provider.processPaymentConfirmation(intent.providerRef, idempotencyKey);
     const offenderAfterFirst = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-    expect(offenderAfterFirst.balance).toBe(112.50); // 82.50 + 30.00
+    expect(Number(offenderAfterFirst.balance)).toBe(112.50); // 82.50 + 30.00
 
     // 2nd confirmation with same providerRef
     const secondResult = await provider.processPaymentConfirmation(intent.providerRef, idempotencyKey);
@@ -103,7 +103,7 @@ describe('Phase 3: Electronic Payments (Stripe/PayPal) & Family Portal Verificat
 
     // Balance MUST NOT double credit
     const offenderAfterSecond = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-    expect(offenderAfterSecond.balance).toBe(112.50);
+    expect(Number(offenderAfterSecond.balance)).toBe(112.50);
   });
 
   it('should detect and reject amount mismatch fraud during payment confirmation', async () => {
@@ -124,7 +124,7 @@ describe('Phase 3: Electronic Payments (Stripe/PayPal) & Family Portal Verificat
 
     // Offender balance must NOT change
     const offender = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-    expect(offender.balance).toBe(82.50);
+    expect(Number(offender.balance)).toBe(82.50);
 
     // Deposit must be marked FAILED
     const deposit = await prisma.deposit.findUniqueOrThrow({ where: { providerRef: intent.providerRef } });

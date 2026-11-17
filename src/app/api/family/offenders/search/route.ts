@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma, { caseInsensitiveContains } from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
+import { toMoneyNumber } from '@/lib/money';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,7 +77,7 @@ export async function GET(req: NextRequest) {
         id: o.id,
         name: o.name,
         facilityName: o.facility.name,
-        maxDepositAmount: o.facility.maxDepositAmount,
+        maxDepositAmount: toMoneyNumber(o.facility.maxDepositAmount),
         giftPackagesEnabled: o.facility.giftPackagesEnabled,
       })),
     });

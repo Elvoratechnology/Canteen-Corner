@@ -36,7 +36,7 @@ describe('Phase 5: Acceptance Tests Suite (Per Specification)', () => {
 
   it('ACCEPTANCE TEST 1: Cart of 2 soap + 4 ramen + 1 coffee = $15.00; balance goes from $82.50 to $67.50; order appears in Warehouse queue', async () => {
     const offender = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-    expect(offender.balance).toBe(82.50);
+    expect(Number(offender.balance)).toBe(82.50);
 
     const soap = await prisma.product.findUniqueOrThrow({ where: { sku: 'PC-002' } }); // 2.00
     const ramen = await prisma.product.findUniqueOrThrow({ where: { sku: 'SNK-001' } }); // 1.50
@@ -61,7 +61,7 @@ describe('Phase 5: Acceptance Tests Suite (Per Specification)', () => {
         });
       }
 
-      const balanceAfter = Math.round((offender.balance - total) * 100) / 100;
+      const balanceAfter = Math.round((Number(offender.balance) - total) * 100) / 100;
       await tx.offender.update({
         where: { id: offender.id },
         data: { balance: balanceAfter, currentWeeklySpent: total },
@@ -111,7 +111,7 @@ describe('Phase 5: Acceptance Tests Suite (Per Specification)', () => {
     // 1. Balance must decrease to exactly $67.50
     expect(result.balanceAfter).toBe(67.50);
     const updatedOffender = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-    expect(updatedOffender.balance).toBe(67.50);
+    expect(Number(updatedOffender.balance)).toBe(67.50);
 
     // 2. Order appears in Warehouse queue (PROCESSING + picking list PENDING)
     const warehouseOrder = await prisma.order.findUnique({
@@ -128,7 +128,7 @@ describe('Phase 5: Acceptance Tests Suite (Per Specification)', () => {
 
     // Test over balance
     const orderOverBalance = 90.00; // balance is $82.50
-    expect(orderOverBalance > offender.balance).toBe(true);
+    expect(orderOverBalance > Number(offender.balance)).toBe(true);
 
     // Test over weekly limit
     await prisma.offender.update({
@@ -137,7 +137,7 @@ describe('Phase 5: Acceptance Tests Suite (Per Specification)', () => {
     });
     const updated = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
     const orderOverLimit = 10.00;
-    expect(updated.currentWeeklySpent + orderOverLimit > updated.weeklyLimit).toBe(true);
+    expect(Number(updated.currentWeeklySpent) + orderOverLimit > Number(updated.weeklyLimit)).toBe(true);
   });
 
   it('ACCEPTANCE TEST 3: An electronic deposit raises the inmate balance only after confirmation, and appears in deposit history and ledger', async () => {
@@ -154,14 +154,14 @@ describe('Phase 5: Acceptance Tests Suite (Per Specification)', () => {
 
     // Before confirmation: balance is $82.50
     const beforeOffender = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-    expect(beforeOffender.balance).toBe(82.50);
+    expect(Number(beforeOffender.balance)).toBe(82.50);
 
     // Confirmation
     await provider.processPaymentConfirmation(intent.providerRef, idemp);
 
     // After confirmation: balance is $122.50
     const afterOffender = await prisma.offender.findUniqueOrThrow({ where: { id: 'A1234567' } });
-    expect(afterOffender.balance).toBe(122.50);
+    expect(Number(afterOffender.balance)).toBe(122.50);
 
     // Appears in deposit history
     const deposit = await prisma.deposit.findUniqueOrThrow({ where: { providerRef: intent.providerRef } });
@@ -169,8 +169,8 @@ describe('Phase 5: Acceptance Tests Suite (Per Specification)', () => {
 
     // Appears in ledger
     const ledger = await prisma.ledgerEntry.findFirstOrThrow({ where: { referenceId: intent.providerRef } });
-    expect(ledger.credit).toBe(40.00);
-    expect(ledger.balanceAfter).toBe(122.50);
+    expect(Number(ledger.credit)).toBe(40.00);
+    expect(Number(ledger.balanceAfter)).toBe(122.50);
   });
 
   it('ACCEPTANCE TEST 4: Warehouse can pick, package, scan and include the order in a manifest. Items at or below reorder level appear in shortages', async () => {

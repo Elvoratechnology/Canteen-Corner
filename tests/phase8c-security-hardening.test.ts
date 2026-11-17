@@ -273,7 +273,7 @@ describe('CANTEEN CORNER — PHASE 8C Security Hardening, Session Revocation & F
 
       // Verify balance was NOT deducted
       const finalOffender = await prisma.offender.findUniqueOrThrow({ where: { id: inmateOffender.id } });
-      expect(finalOffender.balance).toBe(5.00);
+      expect(Number(finalOffender.balance)).toBe(5.00);
 
       vi.restoreAllMocks();
     });
@@ -320,7 +320,7 @@ describe('CANTEEN CORNER — PHASE 8C Security Hardening, Session Revocation & F
 
       // Check balance was incremented exactly once
       const afterFirst = await prisma.offender.findUniqueOrThrow({ where: { id: inmateOffender.id } });
-      expect(afterFirst.balance).toBe(initialBalance + depositAmount);
+      expect(Number(afterFirst.balance)).toBe(initialBalance + depositAmount);
 
       // Second duplicate delivery (replay)
       const secondResult = await processVerifiedDepositConfirmation({
@@ -336,7 +336,7 @@ describe('CANTEEN CORNER — PHASE 8C Security Hardening, Session Revocation & F
 
       // Balance MUST remain unchanged (credited exactly once)
       const afterSecond = await prisma.offender.findUniqueOrThrow({ where: { id: inmateOffender.id } });
-      expect(afterSecond.balance).toBe(initialBalance + depositAmount);
+      expect(Number(afterSecond.balance)).toBe(initialBalance + depositAmount);
     });
 
     it('should atomically process administrative balance adjustment and reject negative balance', async () => {
@@ -371,7 +371,7 @@ describe('CANTEEN CORNER — PHASE 8C Security Hardening, Session Revocation & F
       expect(data.error).toContain('negative balance');
 
       const check = await prisma.offender.findUniqueOrThrow({ where: { id: inmateOffender.id } });
-      expect(check.balance).toBe(20.00);
+      expect(Number(check.balance)).toBe(20.00);
 
       vi.restoreAllMocks();
     });
@@ -425,12 +425,12 @@ describe('CANTEEN CORNER — PHASE 8C Security Hardening, Session Revocation & F
     const originalSecret = process.env.JWT_SECRET;
 
     afterEach(() => {
-      process.env.NODE_ENV = originalEnv;
+      (process.env as any).NODE_ENV = originalEnv;
       process.env.JWT_SECRET = originalSecret;
     });
 
     it('should reject weak secrets (<32 characters) in production mode', () => {
-      process.env.NODE_ENV = 'production';
+      (process.env as any).NODE_ENV = 'production';
       process.env.JWT_SECRET = 'short-secret-key-123';
 
       expect(() => getJwtSecretKey()).toThrowError(
@@ -439,7 +439,7 @@ describe('CANTEEN CORNER — PHASE 8C Security Hardening, Session Revocation & F
     });
 
     it('should reject insecure default placeholder secrets in production mode', () => {
-      process.env.NODE_ENV = 'production';
+      (process.env as any).NODE_ENV = 'production';
       process.env.JWT_SECRET = 'canteen-corner-super-secret-jwt-key-change-in-production';
 
       expect(() => getJwtSecretKey()).toThrowError(
@@ -448,7 +448,7 @@ describe('CANTEEN CORNER — PHASE 8C Security Hardening, Session Revocation & F
     });
 
     it('should accept strong 32+ character secret in production mode', () => {
-      process.env.NODE_ENV = 'production';
+      (process.env as any).NODE_ENV = 'production';
       process.env.JWT_SECRET = 'a-very-strong-production-jwt-secret-key-with-high-entropy-64bytes!';
 
       const key = getJwtSecretKey();

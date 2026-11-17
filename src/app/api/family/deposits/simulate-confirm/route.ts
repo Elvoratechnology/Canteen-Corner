@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getPaymentProvider } from '@/lib/payments';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
+import { serializeDeposit } from '@/lib/money';
 import { z } from 'zod';
 
 const ConfirmSchema = z.object({
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      deposit: updatedDeposit,
+      deposit: serializeDeposit(updatedDeposit),
       message: confirmation.message,
     });
   } catch (error: any) {

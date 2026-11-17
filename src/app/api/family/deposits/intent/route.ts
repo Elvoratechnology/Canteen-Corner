@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
 import { getPaymentProvider } from '@/lib/payments';
+import { toDecimal, toMoneyString } from '@/lib/money';
 import { z } from 'zod';
 
 const DepositIntentSchema = z.object({
@@ -40,9 +41,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Offender not found.' }, { status: 404 });
     }
 
-    if (amount > offender.facility.maxDepositAmount) {
+    const amountDecimal = toDecimal(amount);
+    if (amountDecimal.greaterThan(offender.facility.maxDepositAmount)) {
       return NextResponse.json(
-        { error: `Facility deposit limit is $${offender.facility.maxDepositAmount.toFixed(2)}.` },
+        { error: `Facility deposit limit is ${toMoneyString(offender.facility.maxDepositAmount, true)}.` },
         { status: 400 }
       );
     }

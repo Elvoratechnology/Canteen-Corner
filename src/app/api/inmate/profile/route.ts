@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
+import { toDecimal, toMoneyNumber } from '@/lib/money';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,11 +40,11 @@ export async function GET() {
     // Check if a reset day has passed
     let currentWeeklySpent = offender.currentWeeklySpent;
     if (dayDiff >= 7 || (now.getDay() === facilityResetDay && lastReset.getDay() !== facilityResetDay)) {
-      currentWeeklySpent = 0.0;
+      currentWeeklySpent = toDecimal(0.0);
       await prisma.offender.update({
         where: { id: offender.id },
         data: {
-          currentWeeklySpent: 0.0,
+          currentWeeklySpent: toDecimal(0.0),
           lastWeeklyReset: now,
         },
       });
@@ -56,9 +57,10 @@ export async function GET() {
     nextDelivery.setDate(nextDelivery.getDate() + daysUntilThursday);
     nextDelivery.setHours(14, 0, 0, 0);
 
-    const remainingWeeklyLimit = Math.max(0, offender.weeklyLimit - currentWeeklySpent);
+    const remLimit = offender.weeklyLimit.minus(currentWeeklySpent);
+    const remainingWeeklyLimit = remLimit.greaterThan(0) ? remLimit : toDecimal(0);
     // Effective available spending is min(balance, remainingWeeklyLimit)
-    const availableSpending = Math.min(offender.balance, remainingWeeklyLimit);
+    const availableSpending = offender.balance.lessThan(remainingWeeklyLimit) ? offender.balance : remainingWeeklyLimit;
 
     const lastDeposit = offender.deposits[0] || null;
 
@@ -72,15 +74,15 @@ export async function GET() {
         name: offender.name,
         unit: offender.unit,
         housing: offender.housing,
-        balance: offender.balance,
-        weeklyLimit: offender.weeklyLimit,
-        currentWeeklySpent: currentWeeklySpent,
-        remainingWeeklyLimit: remainingWeeklyLimit,
-        availableSpending: availableSpending,
+        balance: toMoneyNumber(offender.balance),
+        weeklyLimit: toMoneyNumber(offender.weeklyLimit),
+        currentWeeklySpent: toMoneyNumber(currentWeeklySpent),
+        remainingWeeklyLimit: toMoneyNumber(remainingWeeklyLimit),
+        availableSpending: toMoneyNumber(availableSpending),
         nextDeliveryDate: nextDelivery.toISOString(),
         lastDeposit: lastDeposit
           ? {
-              amount: lastDeposit.amount,
+              amount: toMoneyNumber(lastDeposit.amount),
               date: lastDeposit.createdAt.toISOString(),
               ref: lastDeposit.providerRef,
             }
@@ -97,4 +99,3 @@ export async function GET() {
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 }
-
