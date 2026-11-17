@@ -8,7 +8,6 @@ import {
   Wallet,
   ShoppingCart,
   ClipboardList,
-  Gift,
   ArrowRight,
   Megaphone,
   Loader2,
@@ -186,8 +185,8 @@ export default function InmateDashboard() {
         </div>
       </div>
 
-      {/* 4 Quick Access Action Cards (Matching Image 2 Screen 1 exactly!) */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* 3 Quick Access Action Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* 1. Browse Products (Teal Cart) */}
         <Link
           href="/inmate/catalog"
@@ -235,23 +234,6 @@ export default function InmateDashboard() {
           </h3>
           <div className="mt-2 text-purple-600 dark:text-purple-400 text-xs font-semibold flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
             <span>View Ledger</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </div>
-        </Link>
-
-        {/* 4. Rewards (Orange Gift Box) */}
-        <Link
-          href="/inmate/reentry-rewards"
-          className="group bg-white dark:bg-[#121212] p-5 rounded-3xl border border-slate-200 dark:border-[#262626] shadow-sm hover:shadow-md hover:border-orange-400 dark:hover:border-orange-500 transition-all flex flex-col items-center text-center"
-        >
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center shadow-md mb-3 group-hover:scale-105 transition-transform">
-            <Gift className="w-8 h-8" />
-          </div>
-          <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
-            Rewards
-          </h3>
-          <div className="mt-2 text-orange-600 dark:text-orange-400 text-xs font-semibold flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
-            <span>Earn Benefits</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </div>
         </Link>

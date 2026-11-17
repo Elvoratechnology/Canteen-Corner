@@ -9,7 +9,6 @@ import {
   Clock,
   Wallet,
   Bell,
-  Star,
   LogOut,
   User,
   Timer,
@@ -113,7 +112,6 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
           ? profile.unreadNotifications
           : undefined,
     },
-    { href: '/inmate/reentry-rewards', label: 'Rewards', icon: Star },
   ];
 
   return (
@@ -136,8 +134,8 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
                   key={link.href}
                   href={link.href}
                   className={`flex items-center justify-between px-3.5 py-2.5 rounded-2xl text-xs font-semibold transition-all ${isActive
-                      ? 'bg-teal-500 text-white font-bold shadow-sm'
-                      : 'text-slate-600 dark:text-neutral-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#181818]'
+                    ? 'bg-teal-500 text-white font-bold shadow-sm'
+                    : 'text-slate-600 dark:text-neutral-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#181818]'
                     }`}
                 >
                   <div className="flex items-center gap-3">
@@ -147,8 +145,8 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
                   {link.badge !== undefined && (
                     <span
                       className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${isActive
-                          ? 'bg-white text-teal-600'
-                          : 'bg-red-500 text-white'
+                        ? 'bg-white text-teal-600'
+                        : 'bg-red-500 text-white'
                         }`}
                     >
                       {link.badge}
@@ -251,8 +249,8 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
           <Link
             href="/inmate"
             className={`flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${pathname === '/inmate'
-                ? 'text-teal-600 dark:text-teal-400 font-bold'
-                : 'text-slate-500 dark:text-slate-400'
+              ? 'text-teal-600 dark:text-teal-400 font-bold'
+              : 'text-slate-500 dark:text-slate-400'
               }`}
           >
             <Home className="w-5 h-5" />
@@ -262,8 +260,8 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
           <Link
             href="/inmate/catalog"
             className={`flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${pathname === '/inmate/catalog'
-                ? 'text-teal-600 dark:text-teal-400 font-bold'
-                : 'text-slate-500 dark:text-slate-400'
+              ? 'text-teal-600 dark:text-teal-400 font-bold'
+              : 'text-slate-500 dark:text-slate-400'
               }`}
           >
             <ShoppingBag className="w-5 h-5" />
@@ -273,8 +271,8 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
           <Link
             href="/inmate/cart"
             className={`relative flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${pathname === '/inmate/cart'
-                ? 'text-teal-600 dark:text-teal-400 font-bold'
-                : 'text-slate-500 dark:text-slate-400'
+              ? 'text-teal-600 dark:text-teal-400 font-bold'
+              : 'text-slate-500 dark:text-slate-400'
               }`}
           >
             <div className="relative">
@@ -291,8 +289,8 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
           <Link
             href="/inmate/orders"
             className={`flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${pathname === '/inmate/orders'
-                ? 'text-teal-600 dark:text-teal-400 font-bold'
-                : 'text-slate-500 dark:text-slate-400'
+              ? 'text-teal-600 dark:text-teal-400 font-bold'
+              : 'text-slate-500 dark:text-slate-400'
               }`}
           >
             <Clock className="w-5 h-5" />
@@ -302,8 +300,8 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
           <Link
             href="/inmate/balance"
             className={`flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${pathname === '/inmate/balance'
-                ? 'text-teal-600 dark:text-teal-400 font-bold'
-                : 'text-slate-500 dark:text-slate-400'
+              ? 'text-teal-600 dark:text-teal-400 font-bold'
+              : 'text-slate-500 dark:text-slate-400'
               }`}
           >
             <Wallet className="w-5 h-5" />

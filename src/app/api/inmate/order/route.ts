@@ -139,31 +139,56 @@ export async function POST(req: NextRequest) {
       nextDelivery.setDate(nextDelivery.getDate() + daysUntilThursday);
       nextDelivery.setHours(14, 0, 0, 0);
 
-      // 6. Deduct stock from each aggregated product
+      // 6. Deduct stock from each aggregated product conditionally (GAP-05 Oversold Protection)
       // Set transaction authorization config in PostgreSQL if RLS / balance trigger is active
       if (process.env.DATABASE_URL?.startsWith('postgres')) {
         await tx.$executeRawUnsafe(`SELECT set_config('canteen.authorized_transaction', 'true', true);`).catch(() => {});
       }
 
       for (const [productId, quantity] of Array.from(aggregatedItemsMap.entries())) {
-        await tx.product.update({
-          where: { id: productId },
-          data: { stock: { decrement: quantity } },
+        const prod = productMap.get(productId);
+        const stockUpdate = await tx.product.updateMany({
+          where: {
+            id: productId,
+            stock: { gte: quantity },
+          },
+          data: {
+            stock: { decrement: quantity },
+          },
         });
+
+        if (stockUpdate.count === 0) {
+          throw new Error(
+            `Insufficient stock for "${prod?.name || productId}". Product inventory changed during checkout.`
+          );
+        }
       }
 
-      // 7. Update Offender balance and weekly spent
-      const balanceBefore = offender.balance;
-      const balanceAfter = Math.round((balanceBefore - orderTotal) * 100) / 100;
-      const newWeeklySpent = Math.round((offender.currentWeeklySpent + orderTotal) * 100) / 100;
-
-      await tx.offender.update({
-        where: { id: offender.id },
+      // 7. Atomic conditional balance deduction & weekly spent increment (GAP-03 Concurrency Protection)
+      const balanceUpdate = await tx.offender.updateMany({
+        where: {
+          id: offender.id,
+          balance: { gte: orderTotal },
+        },
         data: {
-          balance: balanceAfter,
-          currentWeeklySpent: newWeeklySpent,
+          balance: { decrement: orderTotal },
+          currentWeeklySpent: { increment: orderTotal },
         },
       });
+
+      if (balanceUpdate.count === 0) {
+        throw new Error(
+          `Insufficient funds. Your available balance is insufficient to complete this order.`
+        );
+      }
+
+      // Read authoritative post-deduction balance from database to record exact ledger snapshot
+      const freshOffender = await tx.offender.findUniqueOrThrow({
+        where: { id: offender.id },
+      });
+      const balanceAfter = freshOffender.balance;
+      const balanceBefore = Math.round((balanceAfter + orderTotal) * 100) / 100;
+      const newWeeklySpent = freshOffender.currentWeeklySpent;
 
       // 8. Create Order record
       const createdOrder = await tx.order.create({

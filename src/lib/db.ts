@@ -17,3 +17,15 @@ if (process.env.NODE_ENV !== 'production') {
 
 export default prisma;
 
+/**
+ * Generates a database-compatible case-insensitive text search condition.
+ * - Under PostgreSQL: provides `{ contains: value, mode: 'insensitive' }`
+ * - Under SQLite: provides `{ contains: value }` (SQLite comparisons are case-insensitive by default)
+ */
+export function caseInsensitiveContains(value: string): any {
+  const isPostgres = process.env.DATABASE_URL?.startsWith('postgres');
+  return isPostgres
+    ? { contains: value, mode: 'insensitive' }
+    : { contains: value };
+}
+

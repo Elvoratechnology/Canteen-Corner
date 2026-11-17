@@ -9,6 +9,7 @@ export interface SessionPayload {
   staffId?: string;
   facilityId?: string;
   lastActivity?: number;
+  tokenVersion?: number;
 }
 
 export const COOKIE_NAME = 'canteen_session';
@@ -32,7 +33,33 @@ export function getJwtSecretKey(): Uint8Array {
       'SERVER CONFIGURATION ERROR: JWT_SECRET environment variable is missing or empty. A secure random secret is required to sign and verify sessions.'
     );
   }
-  return new TextEncoder().encode(secret.trim());
+
+  const trimmed = secret.trim();
+
+  // In production, enforce minimum 32 characters and reject common insecure values
+  if (process.env.NODE_ENV === 'production') {
+    if (trimmed.length < 32) {
+      throw new Error(
+        'SERVER CONFIGURATION ERROR: JWT_SECRET must be at least 32 characters long in production mode.'
+      );
+    }
+    const insecurePlaceholders = [
+      'secret',
+      'changeme',
+      'development',
+      'dev-secret',
+      'placeholder',
+      'test-secret',
+      'canteen-corner-super-secret-jwt-key-change-in-production',
+    ];
+    if (insecurePlaceholders.some(p => trimmed.toLowerCase() === p)) {
+      throw new Error(
+        'SERVER CONFIGURATION ERROR: Insecure default JWT_SECRET detected in production environment. A cryptographically secure random secret is required.'
+      );
+    }
+  }
+
+  return new TextEncoder().encode(trimmed);
 }
 
 export async function signSession(payload: SessionPayload): Promise<string> {
@@ -40,6 +67,7 @@ export async function signSession(payload: SessionPayload): Promise<string> {
   const nowInSeconds = Math.floor(Date.now() / 1000);
   const sessionData: SessionPayload = {
     ...payload,
+    tokenVersion: payload.tokenVersion ?? 0,
     lastActivity: payload.lastActivity ?? nowInSeconds,
   };
   // Session timeout: 4 hours for normal users, or 30 mins for inmates on shared kiosks

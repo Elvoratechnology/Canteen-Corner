@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/db';
+import prisma, { caseInsensitiveContains } from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
@@ -50,9 +52,9 @@ export async function GET(req: NextRequest) {
     if (search && search.trim() !== '') {
       whereClause.AND.push({
         OR: [
-          { name: { contains: search.trim() } },
-          { description: { contains: search.trim() } },
-          { category: { contains: search.trim() } },
+          { name: caseInsensitiveContains(search.trim()) },
+          { description: caseInsensitiveContains(search.trim()) },
+          { category: caseInsensitiveContains(search.trim()) },
         ],
       });
     }

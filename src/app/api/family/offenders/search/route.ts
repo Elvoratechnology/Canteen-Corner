@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/db';
+import prisma, { caseInsensitiveContains } from '@/lib/db';
 import { getCurrentSession } from '@/lib/auth';
+
+export const dynamic = 'force-dynamic';
 
 // Rate limiter: Max 20 searches per 60 seconds per family account to prevent roster enumeration
 const searchRateLimits = new Map<string, { count: number; resetTime: number }>();
@@ -52,8 +54,8 @@ export async function GET(req: NextRequest) {
     const offenders = await prisma.offender.findMany({
       where: {
         OR: [
-          { id: { contains: trimmed.toUpperCase() } },
-          { name: { contains: trimmed } },
+          { id: caseInsensitiveContains(trimmed) },
+          { name: caseInsensitiveContains(trimmed) },
         ],
       },
       include: {

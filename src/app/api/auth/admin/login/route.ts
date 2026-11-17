@@ -89,6 +89,7 @@ export async function POST(req: NextRequest) {
       staffId: user.staffId || undefined,
       facilityId: user.facilityId || undefined,
       role: 'ADMIN',
+      tokenVersion: user.tokenVersion ?? 0,
     });
 
     await logAuditAction({

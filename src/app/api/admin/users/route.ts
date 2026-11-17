@@ -5,6 +5,8 @@ import { logAuditAction } from '@/lib/audit';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getCurrentSession();
@@ -116,8 +118,9 @@ export async function POST(req: NextRequest) {
 
 const UpdateUserSchema = z.object({
   userId: z.string().min(1),
-  action: z.enum(['UNLOCK', 'LOCK', 'CHANGE_ROLE']),
+  action: z.enum(['UNLOCK', 'LOCK', 'CHANGE_ROLE', 'REASSIGN_FACILITY']),
   newRole: z.enum(['WAREHOUSE_PICKER', 'WAREHOUSE_SUPERVISOR', 'ADMIN']).optional(),
+  newFacilityId: z.string().optional().nullable(),
 });
 
 export async function PATCH(req: NextRequest) {
@@ -134,7 +137,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: result.error.errors[0]?.message || 'Invalid input' }, { status: 400 });
     }
 
-    const { userId, action, newRole } = result.data;
+    const { userId, action, newRole, newFacilityId } = result.data;
     const targetUser = await prisma.user.findUnique({ where: { id: userId } });
     if (!targetUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -163,11 +166,13 @@ export async function PATCH(req: NextRequest) {
 
     let updateData: any = {};
     if (action === 'UNLOCK') {
-      updateData = { failedLoginAttempts: 0, lockedUntil: null };
+      updateData = { failedLoginAttempts: 0, lockedUntil: null, tokenVersion: { increment: 1 } };
     } else if (action === 'LOCK') {
-      updateData = { lockedUntil: new Date(Date.now() + 24 * 60 * 60 * 1000) };
+      updateData = { lockedUntil: new Date(Date.now() + 24 * 60 * 60 * 1000), tokenVersion: { increment: 1 } };
     } else if (action === 'CHANGE_ROLE' && newRole) {
-      updateData = { role: newRole };
+      updateData = { role: newRole, tokenVersion: { increment: 1 } };
+    } else if (action === 'REASSIGN_FACILITY') {
+      updateData = { facilityId: newFacilityId ?? null, tokenVersion: { increment: 1 } };
     }
 
     const updated = await prisma.user.update({

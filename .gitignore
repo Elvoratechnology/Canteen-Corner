@@ -22,6 +22,8 @@ yarn-error.log*
 # Local environment files & secrets
 .env
 .env*.local
+.env.staging
+.env.staging*
 cookies.txt
 
 # Local SQLite databases & temp files

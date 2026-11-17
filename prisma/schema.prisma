@@ -31,6 +31,7 @@ model User {
   role                 String          // INMATE, FAMILY, WAREHOUSE_PICKER, WAREHOUSE_SUPERVISOR, ADMIN
   failedLoginAttempts  Int             @default(0)
   lockedUntil          DateTime?
+  tokenVersion         Int             @default(0)
   emailVerified        Boolean         @default(false)
   verificationToken    String?
   facilityId           String?
@@ -56,6 +57,7 @@ model Offender {
   lastWeeklyReset    DateTime        @default(now())
   failedPinAttempts  Int             @default(0)
   pinLockedUntil     DateTime?
+  tokenVersion       Int             @default(0)
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
   facility           Facility        @relation(fields: [facilityId], references: [id])

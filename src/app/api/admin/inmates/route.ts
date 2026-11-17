@@ -5,6 +5,8 @@ import { logAuditAction } from '@/lib/audit';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getCurrentSession();
@@ -40,7 +42,7 @@ export async function GET(req: NextRequest) {
 
 const InmateAdjustmentSchema = z.object({
   offenderId: z.string().min(1),
-  action: z.enum(['ADJUST_BALANCE', 'UPDATE_LIMIT', 'RESET_PIN_LOCK']),
+  action: z.enum(['ADJUST_BALANCE', 'UPDATE_LIMIT', 'RESET_PIN_LOCK', 'LOCK_PIN']),
   amount: z.number().optional(), // for ADJUST_BALANCE (positive for credit, negative for debit)
   newWeeklyLimit: z.number().positive().optional(),
   reason: z.string().min(3, 'Audit reason is required'),
@@ -69,7 +71,7 @@ export async function PATCH(req: NextRequest) {
     if (action === 'RESET_PIN_LOCK') {
       await prisma.offender.update({
         where: { id: offenderId },
-        data: { failedPinAttempts: 0, pinLockedUntil: null },
+        data: { failedPinAttempts: 0, pinLockedUntil: null, tokenVersion: { increment: 1 } },
       });
 
       await logAuditAction({
@@ -82,6 +84,24 @@ export async function PATCH(req: NextRequest) {
       });
 
       return NextResponse.json({ success: true, message: `PIN lock cleared for ${offender.name}.` });
+    }
+
+    if (action === 'LOCK_PIN') {
+      await prisma.offender.update({
+        where: { id: offenderId },
+        data: { pinLockedUntil: new Date(Date.now() + 24 * 60 * 60 * 1000), tokenVersion: { increment: 1 } },
+      });
+
+      await logAuditAction({
+        action: 'ADMIN_LOCK_INMATE_PIN',
+        actorId: session.userId || 'admin',
+        actorRole: session.role,
+        resourceType: 'OFFENDER',
+        resourceId: offenderId,
+        metadata: { reason },
+      });
+
+      return NextResponse.json({ success: true, message: `PIN locked for ${offender.name}.` });
     }
 
     if (action === 'UPDATE_LIMIT') {
@@ -118,37 +138,49 @@ export async function PATCH(req: NextRequest) {
       let calculatedNewBalance = 0;
 
       const updated = await prisma.$transaction(async (tx) => {
-        // 1. Authoritative balance read inside transaction
-        const currentOffender = await tx.offender.findUnique({
+        if (!isCredit) {
+          // Atomic conditional decrement: only deducts if balance >= absAmount
+          const updateResult = await tx.offender.updateMany({
+            where: {
+              id: offenderId,
+              balance: { gte: absAmount },
+            },
+            data: {
+              balance: { decrement: absAmount },
+            },
+          });
+
+          if (updateResult.count === 0) {
+            throw new Error('Adjustment would result in a negative balance.');
+          }
+        } else {
+          // Atomic increment for credits
+          await tx.offender.update({
+            where: { id: offenderId },
+            data: {
+              balance: { increment: absAmount },
+            },
+          });
+        }
+
+        // Read the exact post-atomic balance to record in ledger
+        const off = await tx.offender.findUniqueOrThrow({
           where: { id: offenderId },
         });
 
-        if (!currentOffender) {
-          throw new Error('Inmate record not found during transaction');
-        }
+        calculatedNewBalance = off.balance;
+        previousBalance = isCredit
+          ? Math.round((calculatedNewBalance - absAmount) * 100) / 100
+          : Math.round((calculatedNewBalance + absAmount) * 100) / 100;
 
-        previousBalance = currentOffender.balance;
-        calculatedNewBalance = Math.round((currentOffender.balance + amount) * 100) / 100;
-
-        // 2. Reject negative balances atomically
-        if (calculatedNewBalance < 0) {
-          throw new Error('Adjustment would result in a negative balance.');
-        }
-
-        // 3. Atomically update offender balance
-        const off = await tx.offender.update({
-          where: { id: offenderId },
-          data: { balance: calculatedNewBalance },
-        });
-
-        // 4. Atomically create corresponding double-entry ledger entry
+        // Atomically create corresponding double-entry ledger entry
         await tx.ledgerEntry.create({
           data: {
             offenderId,
             type: 'ADJUSTMENT',
             credit: isCredit ? absAmount : 0,
             debit: !isCredit ? absAmount : 0,
-            balanceBefore: currentOffender.balance,
+            balanceBefore: previousBalance,
             balanceAfter: calculatedNewBalance,
             referenceType: 'MANUAL',
             referenceId: `ADMIN-ADJ-${Date.now()}`,

@@ -7,7 +7,7 @@ import { ShieldAlert, ArrowLeft, LogOut, Lock } from 'lucide-react';
 import { CanteenCornerLogo } from '@/components/CanteenCornerLogo';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
-export default function AccessDeniedPage() {
+function AccessDeniedContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [sessionRole, setSessionRole] = useState<string | null>(null);
@@ -153,4 +153,19 @@ export default function AccessDeniedPage() {
     </div>
   );
 }
+
+export default function AccessDeniedPage() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="min-h-screen bg-[#f8fafc] dark:bg-black flex items-center justify-center p-4">
+          <div className="text-xs text-slate-500 animate-pulse">Loading access control...</div>
+        </div>
+      }
+    >
+      <AccessDeniedContent />
+    </React.Suspense>
+  );
+}
+
 

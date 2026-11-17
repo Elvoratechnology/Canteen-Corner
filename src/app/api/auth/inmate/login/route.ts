@@ -125,6 +125,7 @@ export async function POST(req: NextRequest) {
       name: offender.name,
       role: 'INMATE',
       facilityId: offender.facilityId,
+      tokenVersion: offender.tokenVersion ?? 0,
     });
 
     await logAuditAction({

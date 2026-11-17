@@ -4,6 +4,8 @@ import { getCurrentSession } from '@/lib/auth';
 import { logAuditAction } from '@/lib/audit';
 import { z } from 'zod';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getCurrentSession();

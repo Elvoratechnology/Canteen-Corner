@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/auth';
 import prisma from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     const session = await getCurrentSession();
@@ -56,6 +58,25 @@ export async function GET() {
 }
 
 export async function POST() {
+  try {
+    const session = await getCurrentSession();
+    if (session) {
+      if (session.role === 'INMATE' && session.offenderId) {
+        await prisma.offender.update({
+          where: { id: session.offenderId },
+          data: { tokenVersion: { increment: 1 } },
+        }).catch(() => {});
+      } else if (session.userId) {
+        await prisma.user.update({
+          where: { id: session.userId },
+          data: { tokenVersion: { increment: 1 } },
+        }).catch(() => {});
+      }
+    }
+  } catch {
+    // Proceed with clearing client cookie regardless of database error
+  }
+
   const response = NextResponse.json({ success: true, message: 'Logged out successfully' });
   response.cookies.set('canteen_session', '', {
     httpOnly: true,

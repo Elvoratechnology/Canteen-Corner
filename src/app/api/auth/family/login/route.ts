@@ -79,6 +79,7 @@ export async function POST(req: NextRequest) {
       name: user.name,
       email: user.email || '',
       role: 'FAMILY',
+      tokenVersion: user.tokenVersion ?? 0,
     });
 
     await logAuditAction({

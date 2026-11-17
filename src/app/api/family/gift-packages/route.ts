@@ -4,6 +4,8 @@ import { getCurrentSession } from '@/lib/auth';
 import { logAuditAction } from '@/lib/audit';
 import { z } from 'zod';
 
+export const dynamic = 'force-dynamic';
+
 const SubmitGiftPackageSchema = z.object({
   offenderId: z.string().min(1),
   packageName: z.string().min(2),

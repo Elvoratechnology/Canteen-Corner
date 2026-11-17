@@ -261,25 +261,42 @@ export async function processVerifiedDepositConfirmation(
       };
     }
 
-    const offender = deposit.offender;
-    const creditAmount = deposit.amount;
-    const balanceBefore = offender.balance;
-    const balanceAfter = Math.round((balanceBefore + creditAmount) * 100) / 100;
-
-    // 1. Credit Inmate Account
-    await tx.offender.update({
-      where: { id: offender.id },
-      data: { balance: balanceAfter },
-    });
-
-    // 2. Mark Deposit as SUCCEEDED
-    await tx.deposit.update({
-      where: { id: deposit.id },
+    // Atomic Idempotency Claim: atomically transition from PENDING -> SUCCEEDED (GAP-03 Idempotency)
+    const claimResult = await tx.deposit.updateMany({
+      where: {
+        id: deposit.id,
+        status: 'PENDING',
+      },
       data: {
         status: 'SUCCEEDED',
         completedAt: new Date(),
       },
     });
+
+    if (claimResult.count === 0) {
+      // Concurrent webhook or process already claimed and finalized this deposit
+      return {
+        success: true,
+        alreadyProcessed: true,
+        message: 'Deposit already processed and credited (idempotent).',
+      };
+    }
+
+    const offender = deposit.offender;
+    const creditAmount = deposit.amount;
+
+    // 1. Atomically Credit Inmate Account (GAP-03 Atomic Increment)
+    await tx.offender.update({
+      where: { id: offender.id },
+      data: { balance: { increment: creditAmount } },
+    });
+
+    // Read authoritative post-credit balance for ledger and notification
+    const freshOffender = await tx.offender.findUniqueOrThrow({
+      where: { id: offender.id },
+    });
+    const balanceAfter = freshOffender.balance;
+    const balanceBefore = Math.round((balanceAfter - creditAmount) * 100) / 100;
 
     // 3. Double-entry Ledger Entry
     const providerLabel = deposit.provider === 'STRIPE' ? 'Stripe' : deposit.provider === 'PAYPAL' ? 'PayPal' : 'Electronic';
