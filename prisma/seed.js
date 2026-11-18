@@ -6,7 +6,11 @@
  * (e.g. `npm run db:seed:demo`).
  */
 if (process.argv.includes('--demo')) {
-  require('./seed-demo.js');
+  const { seedDemo } = require('./seed-demo.js');
+  seedDemo().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
 } else {
   require('./init.js');
 }

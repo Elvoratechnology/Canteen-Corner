@@ -8,6 +8,12 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function clean() {
+  const dbUrl = (process.env.DATABASE_URL || '').toLowerCase();
+  if (dbUrl.includes('nenhzsruhbqhxtslxkns') || dbUrl.includes('zcamheygapbruuovikar')) {
+    console.error('CRITICAL SECURITY VIOLATION: Database cleaning is strictly prohibited against Production or Staging databases.');
+    process.exit(1);
+  }
+
   console.log('Cleaning demo and sample operational records from Canteen Corner...');
 
   // 1. Clean Orders & Fulfillment

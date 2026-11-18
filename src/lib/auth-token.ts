@@ -50,6 +50,7 @@ export function getJwtSecretKey(): Uint8Array {
       'dev-secret',
       'placeholder',
       'test-secret',
+      'replace_with_a_secure_random_secret',
       'canteen-corner-super-secret-jwt-key-change-in-production',
     ];
     if (insecurePlaceholders.some(p => trimmed.toLowerCase() === p)) {

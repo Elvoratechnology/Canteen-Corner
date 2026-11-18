@@ -11,8 +11,14 @@ const bcrypt = require('bcryptjs');
 const prisma = new PrismaClient();
 
 async function seedDemo() {
-  if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') {
-    console.error('SECURITY ERROR: Demo data seeding is strictly prohibited in production and staging environments.');
+  const dbUrl = (process.env.DATABASE_URL || '').toLowerCase();
+  if (dbUrl.includes('nenhzsruhbqhxtslxkns') || dbUrl.includes('zcamheygapbruuovikar')) {
+    console.error('CRITICAL SECURITY VIOLATION: Demo data seeding is strictly prohibited against Production or Staging databases.');
+    process.exit(1);
+  }
+
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_TEST_SEED !== 'true') {
+    console.error('SECURITY ERROR: Demo data seeding is strictly prohibited in production mode without explicit ALLOW_TEST_SEED=true.');
     process.exit(1);
   }
 

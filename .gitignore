@@ -39,6 +39,9 @@ prisma/dev.db*
 
 # Scratch scripts & temporary audit files
 scratch/
+secure_prod_auth.ps1
+verify_prod_connection.js
+*.zip
 
 .DS_Store
 *.pem

@@ -11,6 +11,7 @@ import {
   PackageX,
   Loader2,
   ArrowRight,
+  X,
 } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 
@@ -96,18 +97,42 @@ export default function CatalogPage() {
 
       {/* Search and Category Filter Bar */}
       <div className="space-y-3">
-        <form onSubmit={handleSearchSubmit} className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+        <form
+          onSubmit={handleSearchSubmit}
+          className="flex items-center w-full bg-white dark:bg-[#121212] border border-slate-200 dark:border-[#262626] rounded-2xl shadow-sm focus-within:border-teal-500 focus-within:ring-2 focus-within:ring-teal-500/20 transition-all p-1.5"
+        >
+          <Search className="w-4 h-4 text-slate-400 ml-2.5 mr-2 shrink-0 pointer-events-none" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search items by name or category (e.g. ramen, soap, coffee)..."
-            className="w-full pl-10 pr-24 py-2.5 rounded-2xl bg-white dark:bg-[#121212] border border-slate-200 dark:border-[#262626] text-slate-900 dark:text-white text-sm focus:outline-none focus:border-teal-500 shadow-sm"
+            className="w-full bg-transparent border-0 text-slate-900 dark:text-white text-sm placeholder-slate-400 focus:outline-none py-1 min-h-[36px]"
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                const url = new URL('/api/inmate/catalog', window.location.origin);
+                if (selectedCategory !== 'All') {
+                  url.searchParams.set('category', selectedCategory);
+                }
+                fetch(url.toString())
+                  .then((res) => res.json())
+                  .then((data) => {
+                    if (data?.products) setProducts(data.products);
+                  });
+              }}
+              className="p-1.5 mr-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg shrink-0 cursor-pointer transition-colors"
+              title="Clear search"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button
             type="submit"
-            className="absolute right-1.5 top-1.5 bottom-1.5 px-3.5 rounded-xl bg-slate-100 dark:bg-[#181818] hover:bg-slate-200 dark:hover:bg-slate-700 text-teal-600 dark:text-teal-400 text-xs font-bold transition-colors"
+            className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-[#1a1a1a] hover:bg-slate-200 dark:hover:bg-[#252525] text-teal-600 dark:text-teal-400 text-xs font-bold transition-all shrink-0 cursor-pointer min-h-[36px] flex items-center justify-center active:scale-95"
           >
             Search
           </button>

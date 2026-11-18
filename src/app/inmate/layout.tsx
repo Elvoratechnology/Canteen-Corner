@@ -18,6 +18,7 @@ import { CartProvider, useCart } from '@/context/CartContext';
 import { CanteenCornerLogo } from '@/components/CanteenCornerLogo';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { KioskSessionWatcher } from '@/components/inmate/KioskSessionWatcher';
+import { InmateNotificationDropdown } from '@/components/inmate/InmateNotificationDropdown';
 
 interface OffenderInfo {
   id: string;
@@ -133,10 +134,11 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`flex items-center justify-between px-3.5 py-2.5 rounded-2xl text-xs font-semibold transition-all ${isActive
-                    ? 'bg-teal-500 text-white font-bold shadow-sm'
-                    : 'text-slate-600 dark:text-neutral-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#181818]'
-                    }`}
+                  className={`flex items-center justify-between px-3.5 py-2.5 rounded-2xl text-xs font-semibold transition-all ${
+                    isActive
+                      ? 'bg-teal-500 text-white font-bold shadow-sm'
+                      : 'text-slate-600 dark:text-neutral-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#181818]'
+                  }`}
                 >
                   <div className="flex items-center gap-3">
                     <Icon className="w-4 h-4 shrink-0" />
@@ -144,10 +146,11 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
                   </div>
                   {link.badge !== undefined && (
                     <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${isActive
-                        ? 'bg-white text-teal-600'
-                        : 'bg-red-500 text-white'
-                        }`}
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        isActive
+                          ? 'bg-white text-teal-600'
+                          : 'bg-teal-100 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300'
+                      }`}
                     >
                       {link.badge}
                     </span>
@@ -214,17 +217,14 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
 
           <div className="flex items-center gap-2">
             <ThemeToggle />
-            <Link
-              href="/inmate/messages"
-              className="relative p-2 rounded-xl bg-slate-100 dark:bg-[#141414] text-slate-700 dark:text-neutral-300 hover:text-teal-500 transition-colors"
-            >
-              <Bell className="w-4 h-4" />
-              {profile?.unreadNotifications && profile.unreadNotifications > 0 ? (
-                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
-                  {profile.unreadNotifications}
-                </span>
-              ) : null}
-            </Link>
+
+            {/* Interactive Notification Dropdown */}
+            <InmateNotificationDropdown
+              initialUnreadCount={profile?.unreadNotifications || 0}
+              onUnreadCountChange={(count) => {
+                setProfile((prev) => (prev ? { ...prev, unreadNotifications: count } : prev));
+              }}
+            />
 
             <button
               onClick={handleLogout}
@@ -248,10 +248,11 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
         <div className="grid grid-cols-5 h-16 items-center px-1">
           <Link
             href="/inmate"
-            className={`flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${pathname === '/inmate'
-              ? 'text-teal-600 dark:text-teal-400 font-bold'
-              : 'text-slate-500 dark:text-slate-400'
-              }`}
+            className={`flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${
+              pathname === '/inmate'
+                ? 'text-teal-600 dark:text-teal-400 font-bold'
+                : 'text-slate-500 dark:text-slate-400'
+            }`}
           >
             <Home className="w-5 h-5" />
             <span className="text-[10px] font-medium mt-1">Home</span>
@@ -259,10 +260,11 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
 
           <Link
             href="/inmate/catalog"
-            className={`flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${pathname === '/inmate/catalog'
-              ? 'text-teal-600 dark:text-teal-400 font-bold'
-              : 'text-slate-500 dark:text-slate-400'
-              }`}
+            className={`flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${
+              pathname === '/inmate/catalog'
+                ? 'text-teal-600 dark:text-teal-400 font-bold'
+                : 'text-slate-500 dark:text-slate-400'
+            }`}
           >
             <ShoppingBag className="w-5 h-5" />
             <span className="text-[10px] font-medium mt-1">Catalog</span>
@@ -270,10 +272,11 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
 
           <Link
             href="/inmate/cart"
-            className={`relative flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${pathname === '/inmate/cart'
-              ? 'text-teal-600 dark:text-teal-400 font-bold'
-              : 'text-slate-500 dark:text-slate-400'
-              }`}
+            className={`relative flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${
+              pathname === '/inmate/cart'
+                ? 'text-teal-600 dark:text-teal-400 font-bold'
+                : 'text-slate-500 dark:text-slate-400'
+            }`}
           >
             <div className="relative">
               <ShoppingCart className="w-5 h-5" />
@@ -288,10 +291,11 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
 
           <Link
             href="/inmate/orders"
-            className={`flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${pathname === '/inmate/orders'
-              ? 'text-teal-600 dark:text-teal-400 font-bold'
-              : 'text-slate-500 dark:text-slate-400'
-              }`}
+            className={`flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${
+              pathname === '/inmate/orders'
+                ? 'text-teal-600 dark:text-teal-400 font-bold'
+                : 'text-slate-500 dark:text-slate-400'
+            }`}
           >
             <Clock className="w-5 h-5" />
             <span className="text-[10px] font-medium mt-1">Orders</span>
@@ -299,10 +303,11 @@ function InmateNavShell({ children }: { children: React.ReactNode }) {
 
           <Link
             href="/inmate/balance"
-            className={`flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${pathname === '/inmate/balance'
-              ? 'text-teal-600 dark:text-teal-400 font-bold'
-              : 'text-slate-500 dark:text-slate-400'
-              }`}
+            className={`flex flex-col items-center justify-center py-1 rounded-lg transition-colors min-h-[44px] ${
+              pathname === '/inmate/balance'
+                ? 'text-teal-600 dark:text-teal-400 font-bold'
+                : 'text-slate-500 dark:text-slate-400'
+            }`}
           >
             <Wallet className="w-5 h-5" />
             <span className="text-[10px] font-medium mt-1">Balance</span>
