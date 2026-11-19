@@ -25,6 +25,9 @@ yarn-error.log*
 .env.staging
 .env.staging*
 cookies.txt
+.jwt_secret
+.jwt_secret*
+.server.pid
 
 # Local SQLite databases & temp files
 prisma/dev.db
@@ -42,6 +45,7 @@ scratch/
 secure_prod_auth.ps1
 verify_prod_connection.js
 *.zip
+*.apk
 
 .DS_Store
 *.pem

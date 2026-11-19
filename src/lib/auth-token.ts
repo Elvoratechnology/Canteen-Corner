@@ -1,3 +1,7 @@
+if (typeof window !== 'undefined') {
+  throw new Error('SERVER-ONLY MODULE: src/lib/auth-token.ts can only be executed in a server environment.');
+}
+
 import { SignJWT, jwtVerify } from 'jose';
 
 export interface SessionPayload {
@@ -99,5 +103,74 @@ export async function verifySession(token: string): Promise<SessionPayload | nul
   } catch {
     return null;
   }
+}
+
+/**
+ * Determines whether authentication session cookies must enforce the `Secure` attribute.
+ *
+ * SECURITY INVARIANT:
+ * 1. In standard production (NODE_ENV === 'production'), cookies MUST ALWAYS be Secure (HTTPS only).
+ * 2. An isolated client evaluation exception is ONLY granted when ALL of the following strict conditions are met:
+ *    - NODE_ENV === 'production'
+ *    - CANTEEN_EVALUATION_MODE === 'true' (server-only environment flag)
+ *    - ALLOW_HTTP_EVALUATION === 'true' (explicit opt-in flag)
+ *    - DATABASE_URL explicitly points to the isolated local SQLite evaluation database (contains 'evaluation.db')
+ *      AND does NOT reference PostgreSQL or remote databases under any circumstance.
+ * 3. PostgreSQL configurations must NEVER qualify for the HTTP evaluation exception.
+ * 4. If any condition is missing, false, invalid, or unexpected, the cookie MUST retain secure: true in production.
+ * 5. In development (NODE_ENV !== 'production'), secure is false to permit localhost development without TLS.
+ */
+export function isSecureCookieRequired(): boolean {
+  if (process.env.NODE_ENV !== 'production') {
+    return false;
+  }
+
+  // Under production NODE_ENV:
+  const isEvalMode = process.env.CANTEEN_EVALUATION_MODE === 'true';
+  const isAllowHttp = process.env.ALLOW_HTTP_EVALUATION === 'true';
+  const dbUrl = (process.env.DATABASE_URL || '').trim();
+
+  // Defense-in-depth: PostgreSQL configurations MUST NEVER qualify for the HTTP evaluation exception
+  const isPostgres =
+    dbUrl.startsWith('postgres://') ||
+    dbUrl.startsWith('postgresql://') ||
+    dbUrl.includes('supabase') ||
+    dbUrl.includes('pooler.supabase.com');
+
+  if (isPostgres) {
+    return true;
+  }
+
+  // Strict exact-path validation: Accept ONLY the exact authorized evaluation SQLite database paths.
+  // Rejects suffixes (.bak), prefixes, path traversal (..), query parameters, subdirectories, or alternate protocols.
+  const exactAcceptedEvaluationPaths = [
+    'file:./evaluation.db',
+    'file:.\\evaluation.db',
+    'file:evaluation.db',
+  ];
+
+  const isSqliteEvaluation = exactAcceptedEvaluationPaths.includes(dbUrl);
+
+  if (isEvalMode && isAllowHttp && isSqliteEvaluation) {
+    return false;
+  }
+
+  // Default fail-safe for production: enforce Secure cookies
+  return true;
+}
+
+/**
+ * Generates standard session cookie options enforcing security boundaries.
+ * 
+ * @param maxAgeSeconds Lifetime of the cookie in seconds (e.g. 1800 for 30m, 14400 for 4h, 0 for deletion)
+ */
+export function getSessionCookieOptions(maxAgeSeconds: number = 4 * 60 * 60) {
+  return {
+    httpOnly: true,
+    secure: isSecureCookieRequired(),
+    sameSite: 'lax' as const,
+    path: '/',
+    maxAge: maxAgeSeconds,
+  };
 }
 

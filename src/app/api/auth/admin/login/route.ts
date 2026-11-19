@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import prisma from '@/lib/db';
-import { signSession } from '@/lib/auth';
+import { signSession, COOKIE_NAME, getSessionCookieOptions } from '@/lib/auth';
 import { logAuditAction } from '@/lib/audit';
 import { z } from 'zod';
 
@@ -111,13 +111,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    response.cookies.set('canteen_session', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 4 * 60 * 60, // 4 hours
-    });
+    response.cookies.set(COOKIE_NAME, token, getSessionCookieOptions(4 * 60 * 60));
 
     return response;
   } catch (error) {

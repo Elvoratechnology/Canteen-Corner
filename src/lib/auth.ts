@@ -7,10 +7,20 @@ import {
   getJwtSecretKey,
   signSession,
   verifySession,
+  isSecureCookieRequired,
+  getSessionCookieOptions,
 } from './auth-token';
 
 export type { SessionPayload };
-export { COOKIE_NAME, INMATE_MAX_INACTIVITY_SECONDS, getJwtSecretKey, signSession, verifySession };
+export {
+  COOKIE_NAME,
+  INMATE_MAX_INACTIVITY_SECONDS,
+  getJwtSecretKey,
+  signSession,
+  verifySession,
+  isSecureCookieRequired,
+  getSessionCookieOptions,
+};
 
 /**
  * Validates the session payload against the authoritative database state.

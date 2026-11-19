@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getCurrentSession } from '@/lib/auth';
+import { getCurrentSession, COOKIE_NAME, getSessionCookieOptions } from '@/lib/auth';
 import prisma from '@/lib/db';
 import { serializeOffender } from '@/lib/money';
 
@@ -79,13 +79,7 @@ export async function POST() {
   }
 
   const response = NextResponse.json({ success: true, message: 'Logged out successfully' });
-  response.cookies.set('canteen_session', '', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 0,
-  });
+  response.cookies.set(COOKIE_NAME, '', getSessionCookieOptions(0));
   return response;
 }
 

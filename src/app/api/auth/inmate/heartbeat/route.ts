@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getCurrentSession, signSession, INMATE_MAX_INACTIVITY_SECONDS } from '@/lib/auth';
+import { getCurrentSession, signSession, INMATE_MAX_INACTIVITY_SECONDS, COOKIE_NAME, getSessionCookieOptions } from '@/lib/auth';
 
 /**
  * Server-Enforced Kiosk Inactivity Heartbeat
@@ -32,13 +32,7 @@ export async function POST() {
       refreshedAt: new Date().toISOString(),
     });
 
-    response.cookies.set('canteen_session', updatedToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 30 * 60,
-    });
+    response.cookies.set(COOKIE_NAME, updatedToken, getSessionCookieOptions(30 * 60));
 
     return response;
   } catch (error) {
